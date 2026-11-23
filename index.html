@@ -365,6 +365,41 @@ const fuera = (x, z, m = 0) => x < XW - m || x > XE + m || z > COAST + m || z < 
 const enSierra = (x, z) => z < ZN - HALF;
 const enArena = (x, z) => !enSierra(x, z) && (x < XW - HALF || z > COAST + HALF);
 const LAGO = { x: -40, z: -840, r: 62, y: 47 };
+/* Autopista del Sur, elevada: corre por el medio de la fila de manzanas j = 3 (z = AU.z), de costa a costa.
+   Va a 5 m; baja al nivel de la calle en las dos costas y en el cruce con la calle central (x = 0), que es
+   por donde se entra y se sale. Debajo quedan estacionamientos; las calles transversales pasan por abajo. */
+const AU = { z: 3 * P + 24, hw: 8, alto: 5, x1: XE - HALF + 2 };
+function auElev(x) {   // altura del tablero sobre el suelo en x
+  const ax = Math.abs(x); if (ax > AU.x1) return null;
+  if (ax >= XE - 38) return AU.alto * clamp((XE - 10 - ax) / 28, 0, 1);   // bajada en la costa
+  if (ax <= 10) return 0;   // el cruce a nivel con la calle central
+  return AU.alto * clamp((ax - 10) / 28, 0, 1);
+}
+function deckAt(x, z, yRef, margen = 0) {
+  const e = auElev(x); if (e === null) return null;
+  const d = Math.abs(z - AU.z); if (d > AU.hw + margen) return null;
+  return { y: e, d, hw: AU.hw, px: x, pz: AU.z };
+}
+const enAutopista = (x, z) => { const d = deckAt(x, z); return !!d && d.y < 1; };
+/* sube, baja o mantiene arriba a un auto o al jugador (o.nivel 0 = suelo, 1 = autopista; o.y = altura). Devuelve la normal si chocó la baranda */
+function nivelEntidad(o, half) {
+  if (o.nivel) {
+    const d = deckAt(o.x, o.z, o.y, 0);
+    if (d && d.d <= d.hw - half) { o.y = d.y; return null; }
+    if (d && d.y < 1.2) { o.nivel = 0; o.y = 0; return null; }   // salió por un tramo a nivel
+    const e = auElev(o.x);
+    if (e === null || e < 1.2) { o.nivel = 0; o.y = 0; return null; }
+    const sg = Math.sign(o.z - AU.z) || 1; o.z = AU.z + sg * (AU.hw - half); o.y = e;
+    return [0, -sg];
+  }
+  const d = deckAt(o.x, o.z, 0, half);
+  if (d && d.d <= d.hw - half && d.y < 1) { o.nivel = 1; o.y = d.y; return null; }
+  if (d && d.y >= 1 && d.y < 3.4) {   // por debajo de la parte baja de una rampa no se pasa
+    const sg = Math.sign(o.z - AU.z) || 1; o.z = AU.z + sg * (AU.hw + half); return [0, sg];
+  }
+  o.y = 0; return null;
+}
+const yDe = o => o.nivel ? o.y : hgt(o.x, o.z);
 const CERROS = [[-330, -980, 78, 190], [160, -1060, 66, 210], [470, -900, 46, 170], [-560, -800, 30, 150], [80, -760, 18, 120]];
 function sierraAlto(x, z) {   // lo que la sierra le suma a la loma (y el pozo del lago)
   const t = clamp((ZN - HALF - z) / 90, 0, 1); if (t <= 0) return 0;
@@ -395,6 +430,7 @@ function hgt(x, z) {
 }
 function districtOf(i, j) {
   if (j * P < ZN) return 'sierra';
+  if (j === 3 && i * P >= XW && i * P < XE) return 'bajoau';   // la fila de manzanas debajo de la autopista elevada
   if (j >= 6 || i * P < XW || i * P >= XE) return 'playa';
   if (i >= -8 && i <= -6 && j >= -3 && j <= 0) return 'aeropuerto';
   if (j <= -8) return 'colina';
@@ -411,8 +447,8 @@ for (const s of STATIONS) { s.x = s.i * P + HALF + 6; s.z = s.j * P + P - HALF +
 const stationAt = (i, j) => STATIONS.find(s => s.i === i && s.j === j);
 function zoneOf(i, j) {
   const d = districtOf(i, j);
-  if (d === 'centro' && (i === -1 || i === 0) && (j === 3 || j === 4)) return 'plaza';   // the big central park
-  if (!stationAt(i, j) && d !== 'playa' && d !== 'colina' && d !== 'casitas' && d !== 'aeropuerto' && d !== 'puerto' && d !== 'industrial' && d !== 'obrero' && !(i === 0 && j === -1) && hash(i * 7 + 3, j * 13 + 1) % 6 === 0) return 'plaza';
+  if (d === 'centro' && (i === -1 || i === 0) && j === 4) return 'plaza';   // the big central park
+  if (!stationAt(i, j) && d !== 'playa' && d !== 'bajoau' && d !== 'colina' && d !== 'casitas' && d !== 'aeropuerto' && d !== 'puerto' && d !== 'industrial' && d !== 'obrero' && !(i === 0 && j === -1) && hash(i * 7 + 3, j * 13 + 1) % 6 === 0) return 'plaza';
   return d;
 }
 const zoneAt = (x, z) => zoneOf(Math.floor(x / P), Math.floor(z / P));
@@ -434,6 +470,7 @@ function alleyOf(i, j) {
   return (h >> 3) % 2 ? 'x' : 'z';
 }
 function clampWalk(o, lim = WALK, half = 0.4) {
+  if (o.nivel) return;   // arriba de la autopista: las barandas las maneja nivelEntidad
   if (fuera(o.x, o.z, HALF - 1)) {   // arena, rambla o costa: se camina libre hasta el agua
     const m = lim === WALK ? 0 : 1.5;
     o.x = clamp(o.x, SHORE_W + m, SHORE_E - m);
@@ -459,6 +496,10 @@ function clampWalk(o, lim = WALK, half = 0.4) {
   const cx = nearest(o.x), cz = nearest(o.z), ox = o.x - cx, oz = o.z - cz;
   if (Math.abs(ox) > lim && Math.abs(oz) > lim) {
     const bi = Math.floor(o.x / P), bj = Math.floor(o.z / P);
+    if (zoneOf(bi, bj) === 'bajoau') {   // debajo de la autopista: se camina, solo molestan los pilares
+      for (const px of [bi * P + 16, bi * P + 32]) if (auElev(px) > 2.5) for (const pz of [AU.z - 5, AU.z + 5]) { const d = Math.hypot(o.x - px, o.z - pz), r = 0.9 + half; if (d < r && d > 1e-4) { o.x = px + (o.x - px) / d * r; o.z = pz + (o.z - pz) / d * r; } }
+      return;
+    }
     if (zoneOf(bi, bj) === 'plaza') { // parks are open ground; only the fountain is in the way
       const fx = bi * P + P / 2, fz = bj * P + P / 2, d = Math.hypot(o.x - fx, o.z - fz);
       if (d < 2.7 && d > 0.001) { o.x = fx + (o.x - fx) / d * 2.7; o.z = fz + (o.z - fz) / d * 2.7; }
@@ -503,7 +544,7 @@ function solidAt(x, z) {
   if (x > AP.x0 && x < AP.x1 && z > AP.z0 && z < AP.z1) return AP_OBS.some(b => x > b[0] && x < b[1] && z > b[2] && z < b[3]);
   if (Math.abs(ox) <= HALF || Math.abs(oz) <= HALF || fuera(x, z, HALF - 1)) return false;
   const bi = Math.floor(x / P), bj = Math.floor(z / P);
-  if (zoneOf(bi, bj) === 'plaza') return false;
+  if (zoneOf(bi, bj) === 'plaza' || zoneOf(bi, bj) === 'bajoau') return false;
   const lot = lotObs(bi, bj); if (lot) return lot.some(b => x > b[0] && x < b[1] && z > b[2] && z < b[3]);
   const al = alleyOf(bi, bj);
   if (al === 'z' && Math.abs(x - (bi * P + P / 2)) < ALLEY) return false;
@@ -1127,6 +1168,31 @@ function armarSierra() {
   g.add(it, ic);
   scene.add(g);
 }
+function armarAutopistaSur() {
+  const g = new THREE.Group(), top = [], tuv = [], lado = [];
+  const mtl = new THREE.MeshLambertMaterial({ map: texOf(hwyCv, 1, 1) }); mtl.map.wrapS = mtl.map.wrapT = THREE.RepeatWrapping; mtl.polygonOffset = true; mtl.polygonOffsetFactor = -1; mtl.polygonOffsetUnits = -2;
+  const cem = lam(concreteCv, 0xd0ccc6, 1, 1);
+  const P3 = (x, z, dy = 0) => [x, auElev(x) + 0.08 + dy, z];
+  for (let x = -AU.x1; x < AU.x1; x += 2) {
+    const x2 = Math.min(AU.x1, x + 2), z0 = AU.z - AU.hw, z1 = AU.z + AU.hw;
+    top.push(...P3(x, z1), ...P3(x2, z1), ...P3(x, z0), ...P3(x, z0), ...P3(x2, z1), ...P3(x2, z0));
+    const u0 = x / 12, u1 = x2 / 12, v0 = 0.1, v1 = 0.9;   // la textura de autopista (20 de ancho) recortada a 16
+    tuv.push(u0, v1, u1, v1, u0, v0, u0, v0, u1, v1, u1, v0);
+    if (Math.min(auElev(x), auElev(x2)) > 0.6) for (const z of [z0, z1]) {   // canto y baranda de hormigón
+      const a = P3(x, z, -0.9), b = P3(x2, z, -0.9), c = P3(x, z, 1.0), d = P3(x2, z, 1.0);
+      lado.push(...a, ...b, ...c, ...c, ...b, ...d);
+      const a2 = P3(x, z0, -0.9), b2 = P3(x2, z0, -0.9), c2 = P3(x, z1, -0.9), d2 = P3(x2, z1, -0.9);
+      if (z === z0) lado.push(...a2, ...c2, ...b2, ...b2, ...c2, ...d2);   // panza
+    }
+  }
+  const mk = (pos, uv, m) => { const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); if (uv) geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); else geo.setAttribute('uv', new THREE.Float32BufferAttribute(new Array(pos.length / 3 * 2).fill(0), 2)); geo.computeVertexNormals(); const me = new THREE.Mesh(geo, m); g.add(me); return me; };
+  mk(top, tuv, mtl);
+  const ml = mk(lado, null, cem); ml.material = cem.clone(); ml.material.side = THREE.DoubleSide;
+  for (let i = XW / P; i < XE / P; i++) for (const px of [i * P + 16, i * P + 32]) { const e = auElev(px); if (e > 2.5) for (const pz of [AU.z - 5, AU.z + 5]) { const c = box(1.3, e - 0.8, 1.3, cem); c.position.set(px, (e - 0.8) / 2, pz); g.add(c); } }
+  const sign = new THREE.Mesh(new THREE.PlaneGeometry(14, 2), new THREE.MeshBasicMaterial({ map: signTexture('AUTOPISTA DEL SUR') }));   // carteles sobre la baranda en las dos puntas
+  for (const sx of [-1, 1]) { const sg = sign.clone(); sg.position.set(sx * (XE - 60), AU.alto + 2.4, AU.z + sx * (AU.hw + 0.2)); sg.rotation.y = sx > 0 ? 0 : PI; g.add(sg); }
+  scene.add(g);
+}
 /* el mar del norte, detrás de la sierra */
 const waterTexN = texOf(waterCv, GL / 16, 300 / 16);
 const seaN = new THREE.Mesh(new THREE.PlaneGeometry(GL + 600, 300), new THREE.MeshLambertMaterial({ map: waterTexN })); seaN.rotation.x = -PI / 2; seaN.position.set(0, 0.06, SHORE_N - 150 + 20); scene.add(seaN);
@@ -1617,6 +1683,13 @@ function buildMonoblocks(g, x0, z0, rng) {
   const pal = tbox(largoX ? 26 : 4, 0.12, largoX ? 4 : 26, stoneMat, 3); pal.position.set(x0 + 14, 0.08, z0 + 14); g.add(pal);   // el patio
   decoTree(g, x0 + 7, 0, z0 + 14, 0.9); decoTree(g, x0 + 21, 0, z0 + 14, 0.9);
 }
+function buildBajoAu(g, x0, z0, rng) {   // estacionamiento debajo del viaducto
+  const piso = tbox(28, 0.1, 28, parkingMat, 5); piso.position.set(x0 + 14, 0.05, z0 + 14); g.add(piso);
+  for (let k = 0; k < 5; k++) if (rng() < 0.6) {   // algún auto viejo estacionado (decorado)
+    const c = box(1.9, 1.3, 4.2, mat(CAR_COLORS[(rng() * CAR_COLORS.length) | 0])); c.position.set(x0 + 3 + k * 5.5, 0.75, z0 + (rng() < 0.5 ? 3 : 25)); g.add(c);
+    const t = box(1.7, 0.6, 2.2, glassMat); t.position.set(c.position.x, 1.7, c.position.z); g.add(t);
+  }
+}
 function buildMansions(g, x0, z0, rng) {
   for (let a = 0; a < 2; a++) for (let b = 0; b < 2; b++) {
     const cx = x0 + 7 + a * 14, cz = z0 + 7 + b * 14, [lo, hi] = footH(cx, cz, 13.6), top = hi + 0.4;
@@ -1866,6 +1939,7 @@ function makeBlock(i, j) {
   else if (zone === 'torres') buildTowers(g, x0, z0, rng, alley);
   else if (zone === 'barrio') buildHouses(g, x0, z0, rng);
   else if (zone === 'obrero') buildMonoblocks(g, x0, z0, rng);
+  else if (zone === 'bajoau') buildBajoAu(g, x0, z0, rng);
   else if (zone === 'colina') buildMansions(g, x0, z0, rng);
   else if (zone === 'plaza') buildPlaza(g, x0, z0, rng, bprops);
   else if (zone === 'paseo') buildPaseo(g, x0, z0, rng, alley);
@@ -2246,12 +2320,13 @@ const LANE = 2.25, CURB = 3.4;
 const carF = c => [-Math.sin(c.th), -Math.cos(c.th)];
 const cardinal = th => ((Math.round(-th / (PI / 2)) % 4) + 4) % 4;
 let carHintT = 0;
-const ZONE_NAMES = { sierra: 'LA SIERRA', lago: 'EL LAGO', obrero: 'VILLA OBRERA', puerto: 'EL PUERTO', industrial: 'ZONA INDUSTRIAL', autopista: 'AUTOPISTA', aeropuerto: 'AEROPUERTO', paseo: 'PASEO TURÍSTICO', casitas: 'BARRIO DE CASITAS', centro: 'EL CENTRO', torres: 'MICROCENTRO', barrio: 'BARRIO RESIDENCIAL', colina: 'LA LOMA', playa: 'LA COSTA', plaza: 'PLAZA' };
+const ZONE_NAMES = { bajoau: 'BAJO AUTOPISTA', autopistaSur: 'AUTOPISTA DEL SUR', sierra: 'LA SIERRA', lago: 'EL LAGO', obrero: 'VILLA OBRERA', puerto: 'EL PUERTO', industrial: 'ZONA INDUSTRIAL', autopista: 'AUTOPISTA', aeropuerto: 'AEROPUERTO', paseo: 'PASEO TURÍSTICO', casitas: 'BARRIO DE CASITAS', centro: 'EL CENTRO', torres: 'MICROCENTRO', barrio: 'BARRIO RESIDENCIAL', colina: 'LA LOMA', playa: 'LA COSTA', plaza: 'PLAZA' };
 let curZone = null, curTurf = null;
 function placeName() {
   const i = Math.floor(player.x / P), j = Math.floor(player.z / P);
   if (enSierra(player.x, player.z)) return Math.hypot(player.x - LAGO.x, player.z - LAGO.z) < LAGO.r + 40 ? 'lago' : 'sierra';
   const ox = player.x - nearest(player.x), oz = player.z - nearest(player.z);
+  if (player.nivel || enAutopista(player.x, player.z)) return 'autopistaSur';
   if (onHwy(player.x, player.z)) return 'autopista';
   if (player.z > COAST + HALF && inPortX(player.x)) return 'puerto';
   if (Math.abs(ox) > HALF && Math.abs(oz) > HALF && zoneOf(i, j) === 'plaza') return 'plaza';
@@ -2477,6 +2552,12 @@ function startTurn(c, sign, R) {
   const base = -cardinal(c.th) * PI / 2;
   c.th = base; c.turn = { sign, R, rem: PI / 2, to: base + sign * PI / 2 }; c.plan = 0; c.dodge = 0; c.dodgeT = 0;
 }
+function spawnAutoAU() {   // un auto arriba de la autopista, adelante o atrás del jugador
+  const dir = Math.random() < 0.5 ? 1 : -1, off = Math.random() < 0.5 ? 2.2 : 5.6, x = clamp(player.x + (Math.random() < 0.6 ? 1 : -1) * rand(55, 75), -AU.x1 + 50, AU.x1 - 50), z = AU.z + dir * off;
+  if (auElev(x) < 4 || cars.some(o => Math.hypot(o.x - x, o.z - z) < 10)) return;
+  const c = makeCar(x, z, faceTo(dir, 0), 'au'); c.nivel = 1; c.y = auElev(x); c.auDir = dir; c.auOff = off;
+  seat(c, randomRig(Math.random() < 0.15)); c.speed = c.cruise * 1.4;
+}
 function setupCars() {
   const [rx, rz] = right(), s = streetSpot(15, (rx || rz) * CURB);
   makeCar(s.x, s.z, faceTo(...DIRS[player.h]), 'parked');
@@ -2499,7 +2580,7 @@ function exitCar() {
   if (challenge) declineRace();
   const out = unseat(c);
   c.state = 'parked'; player.car = null; player.gas = false; input.brake = false; bF.classList.remove('on');
-  player.x = out.x; player.z = out.z; clampWalk(player);
+  player.nivel = c.nivel || 0; player.y = c.y; player.x = out.x; player.z = out.z; clampWalk(player); nivelEntidad(player, 0.4);
   player.h = cardinal(c.th); player.yaw = player.aim = c.th; player.rig.g.rotation.y = c.th;
   updateAttackBtn(); updateShootBtn(); kLab.textContent = 'PATADA'; carHintT = 0; sfx('door');
 }
@@ -2523,6 +2604,12 @@ function updateCars(dt) {
       c.speed = 0; if (c.g.userData.bar) { const on = Math.floor(elapsed * 6) % 2; c.g.userData.bar[0].visible = !!on; c.g.userData.bar[1].visible = !on; }
     } else if (c.state === 'race' || c.state === 'escort') {
       raceDrive(c, dt);
+    } else if (c.state === 'au') {   // tránsito arriba de la autopista: derecho por su carril
+      const want = AU.z + c.auDir * c.auOff, target = c.cruise * 1.5;
+      c.th = angLerp(c.th, faceTo(c.auDir, 0), Math.min(1, dt * 3)); c.z += clamp(want - c.z, -1, 1) * 2 * dt;
+      let t = target; for (const o of cars) { if (o === c || !o.nivel) continue; const ah = (o.x - c.x) * c.auDir; if (ah > 0 && ah < 14 && Math.abs(o.z - c.z) < 2) t = Math.min(t, (ah - 6) * 1.5); }
+      c.speed += clamp(t - c.speed, -12 * dt, c.spec.acc * dt);
+      if (Math.abs(c.x) > AU.x1 - 30 && Math.hypot(c.x - player.x, c.z - player.z) > 30) c.borrar = true;
     } else if (c.state === 'parked') {
       c.speed -= Math.sign(c.speed) * Math.min(Math.abs(c.speed), 6 * dt);
     } else {
@@ -2621,7 +2708,7 @@ function updateCars(dt) {
     if (Math.abs(c.speed) > 3 && state === 'play') {
       const sg = Math.sign(c.speed);
       for (const p of peds) {
-        if (p.state === 'ko') continue;
+        if (p.state === 'ko' || (c.nivel || 0) !== 0) continue;
         const ox = p.x - c.x, oz = p.z - c.z, ah = ox * fx + oz * fz, sd = ox * rx + oz * rz;
         if (Math.abs(ah) < c.hl && Math.abs(sd) < c.hw) {
           pop('¡PUM!', p.x, 2.2, p.z); sfx('crash');
@@ -2630,7 +2717,7 @@ function updateCars(dt) {
           c.speed *= 0.85;
         }
       }
-      if (!player.car && !player.air && !player.down && player.invuln <= 0) {
+      if (!player.car && !player.air && !player.down && player.invuln <= 0 && (player.nivel || 0) === (c.nivel || 0)) {
         const ox = player.x - c.x, oz = player.z - c.z, ah = ox * fx + oz * fz, sd = ox * rx + oz * rz;
         if (Math.abs(ah) < c.hl && Math.abs(sd) < c.hw) {
           const s = Math.sign(sd) || 1; player.x += rx * s * 2.4; player.z += rz * s * 2.4; clampWalk(player);
@@ -2639,13 +2726,16 @@ function updateCars(dt) {
         }
       }
     }
+    { const n = nivelEntidad(c, c.hw); if (n) { const hit = bounceOff(c, n[0], n[1], c.x - n[0] * c.hw, c.z - n[1] * c.hw, 0.25); if (hit > 4) { sfx('crash'); if (c.state === 'player') shake = Math.max(shake, Math.min(0.4, hit * 0.03)); } if (hit > 5) damageCar(c, (hit - 5) * 2, c.state === 'player'); } }
+    if (player.car === c) { player.nivel = c.nivel; player.y = c.y; }
     carSmoke(c, dt);
     const visT = c.state === 'player' ? 0 : clamp(-c.latV * 0.12, -0.35, 0.35) * (c.speed < 0 ? -1 : 1);
     c.vis += (visT - c.vis) * Math.min(1, dt * 8);
     wallCollide(c);
     if (c.state === 'player') { player.x = c.x; player.z = c.z; }
     if (player.car === c) { player.x = c.x; player.z = c.z; }
-    const hf = hgt(c.x + fx * c.hl, c.z + fz * c.hl), hb = hgt(c.x - fx * c.hl, c.z - fz * c.hl);
+    const alt = (x, z) => { if (!c.nivel) return hgt(x, z); const e = auElev(x); return e === null ? c.y : e; };
+    const hf = alt(c.x + fx * c.hl, c.z + fz * c.hl), hb = alt(c.x - fx * c.hl, c.z - fz * c.hl);
     let rollT = 0;
     if (c.spec.moto) {
       if (c.state === 'player') rollT = -(input.r - input.l) * 0.42 * clamp(c.speed / 8, 0, 1);
@@ -2654,7 +2744,7 @@ function updateCars(dt) {
     } else rollT = clamp(-c.w * 0.05, -0.08, 0.08);
     c.roll += (rollT - c.roll) * Math.min(1, dt * 6);
     c.g.position.set(c.x, (hf + hb) / 2, c.z); c.g.rotation.set(Math.atan2(hf - hb, 2 * c.hl), c.th + c.vis, c.roll);
-    if (c.state !== 'player' && c.state !== 'race' && c.state !== 'escort' && c.state !== 'police' && (Math.hypot(c.x - player.x, c.z - player.z) > 100 || (c.driver && fuera(c.x, c.z, 9)))) { scene.remove(c.g); cars.splice(i, 1); }
+    if (c.state !== 'player' && c.state !== 'race' && c.state !== 'escort' && c.state !== 'police' && (Math.hypot(c.x - player.x, c.z - player.z) > 100 || c.borrar || (c.driver && fuera(c.x, c.z, 9)))) { scene.remove(c.g); cars.splice(i, 1); }
   }
   for (let a = 0; a < cars.length; a++) for (let b = a + 1; b < cars.length; b++) collideCars(cars[a], cars[b]);
 }
@@ -2688,7 +2778,7 @@ function wallCollide(c) {
   }
 }
 function collideCars(a, b) {
-  if (Math.abs(a.x - b.x) > 7 || Math.abs(a.z - b.z) > 7) return;
+  if (Math.abs(a.x - b.x) > 7 || Math.abs(a.z - b.z) > 7 || (a.nivel || 0) !== (b.nivel || 0)) return;
   const [afx, afz] = carF(a), [bfx, bfz] = carF(b);
   const ka = Math.max(0, a.hl - a.hw), kb = Math.max(0, b.hl - b.hw), ra = a.hw * 0.95, rb = b.hw * 0.95;
   let best = null;
@@ -2934,7 +3024,7 @@ setTurnMode(false);
 
 /* minimap */
 const mapCv = document.getElementById('map'), mg = mapCv.getContext('2d');
-const ZONE_COLORS = { sierra: '#6f9a5a', obrero: '#b89a86', aeropuerto: '#8f8b96', paseo: '#e89a7a', casitas: '#b8d98a', centro: '#8a6f78', torres: '#6f86a8', barrio: '#9cbf86', colina: '#c9b27a', plaza: '#5fae5a', puerto: '#7d8794', industrial: '#a3968a', playa: '#e9d3a0' };
+const ZONE_COLORS = { bajoau: '#7d7a86', sierra: '#6f9a5a', obrero: '#b89a86', aeropuerto: '#8f8b96', paseo: '#e89a7a', casitas: '#b8d98a', centro: '#8a6f78', torres: '#6f86a8', barrio: '#9cbf86', colina: '#c9b27a', plaza: '#5fae5a', puerto: '#7d8794', industrial: '#a3968a', playa: '#e9d3a0' };
 const SPECIAL_ICON = { cancha: ['F', '#2f7a4a'], bancoC: ['$', '#2f7a4a'], bancoM: ['$', '#2f7a4a'], bancoG: ['$', '#8a6a2a'], iglesia: ['✚', '#5a4a6a'], hospital: ['H', '#d62828'], escuela: ['E', '#24345c'], super: ['S', '#d62828'], nafta: ['N', '#1f5a8a'] };
 function drawMap() {
   const S = 224, sc = S / 150, cx = S / 2, cy = S / 2;
@@ -2970,6 +3060,7 @@ function drawMap() {
     mg.fillStyle = '#e9d3a0'; mg.fillRect(0, sy, S, S); mg.fillStyle = '#2f9fb3'; mg.fillRect(0, wy, S, S);
     mg.fillStyle = '#a7a3ad'; mg.fillRect((PORT.x0 - player.x) * sc + cx, sy, (PORT.x1 - PORT.x0) * sc, (SHORE + PORT.reach - COAST - HALF) * sc);
   }
+  mg.fillStyle = '#d98a2c'; mg.fillRect((-AU.x1 - player.x) * sc + cx, (AU.z - AU.hw - player.z) * sc + cy, AU.x1 * 2 * sc, AU.hw * 2 * sc);   // la autopista elevada
   mg.fillStyle = '#e8a23c';   // motorways
   mg.fillRect(0, (HWZ - 6 - player.z) * sc + cy, S, 12 * sc);
   mg.fillRect((HWX - 6 - player.x) * sc + cx, (HWZ - player.z) * sc + cy, 12 * sc, (COAST + HALF - HWZ) * sc);
@@ -3053,11 +3144,12 @@ function drawBigMap() {
   g.fillStyle = '#a7a3ad'; g.fillRect(X(PORT.x0), Y(COAST + HALF), X(PORT.x1) - X(PORT.x0), Y(SHORE + PORT.reach) - Y(COAST + HALF));
   g.fillStyle = '#3a3a44'; for (const dx of [-60, 62]) g.fillRect(X((PORT.x0 + PORT.x1) / 2 + dx - 26), Y(SHORE + PORT.reach + 3), 52 / P * c, 11 / P * c);
   g.fillStyle = '#8f8b96'; g.fillRect(X(AP.x0), Y(AP.z0), X(AP.x1) - X(AP.x0), Y(AP.z1) - Y(AP.z0)); g.fillStyle = '#3a3842'; g.fillRect(X(RWX - 11), Y(AP.z0 + 8), 22 / P * c, Y(AP.z1 - 8) - Y(AP.z0 + 8));
-  g.fillStyle = '#e8a23c'; g.fillRect(X(XW - HALF), Y(HWZ - 7), X(XE + HALF) - X(XW - HALF), 14 / P * c); g.fillRect(X(HWX - 7), Y(HWZ), 14 / P * c, Y(COAST + HALF) - Y(HWZ));
+  g.fillStyle = '#e8a23c'; g.fillRect(X(XW - HALF), Y(HWZ - 7), X(XE + HALF) - X(XW - HALF), 14 / P * c);
+  g.fillStyle = '#d98a2c'; g.fillRect(X(-AU.x1), Y(AU.z - 7), X(AU.x1) - X(-AU.x1), 14 / P * c); g.fillRect(X(HWX - 7), Y(HWZ), 14 / P * c, Y(COAST + HALF) - Y(HWZ));
   for (const k in GANGS) { const G = GANGS[k]; g.fillStyle = G.css + '77'; g.beginPath(); g.arc(X(G.x), Y(G.z), 30 / P * c, 0, PI * 2); g.fill(); }
   for (const s of STATIONS) { g.fillStyle = '#3b6aff'; g.strokeStyle = '#fff4e2'; g.lineWidth = 2; g.fillRect(X(s.x) - 7, Y(s.z) - 9, 14, 12); g.strokeRect(X(s.x) - 7, Y(s.z) - 9, 14, 12); }
   g.font = '900 15px "Arial Black", Impact, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.lineJoin = 'round';
-  for (const [t, bi, bj] of [['LA LOMA', 0.5, -9.5], ['EL CENTRO', 0.5, -1.5], ['PARQUE', 0, 4], ['MICROCENTRO', 6, -4.5], ['PASEO', 5, 3], ['EL PUERTO', 8, 6.45], ['ZONA INDUSTRIAL', 11, -1], ['BARRIO RESIDENCIAL', -8.4, -5.5], ['CASITAS', -8, 4], ['AEROPUERTO', -6.5, -3.4], ['LA COSTA', -4, 6.5], ['PLAYA OESTE', -12.3, 0.5], ['LA SIERRA', -7, -21], ['EL LAGO', -0.8, -15.6], ['MIRADOR', -6.9, -19.5], ['VILLA OBRERA', -11.5, -2.6], ['RAMBLA', 12.6, 0.5], ['AUTOPISTA NORTE', -7, -7], ['ROJOS', -2, 2], ['AZULES', 2, -3]]) {
+  for (const [t, bi, bj] of [['LA LOMA', 0.5, -9.5], ['EL CENTRO', 0.5, -1.5], ['PARQUE', 0, 4], ['MICROCENTRO', 6, -4.5], ['PASEO', 5, 3], ['EL PUERTO', 8, 6.45], ['ZONA INDUSTRIAL', 11, -1], ['BARRIO RESIDENCIAL', -8.4, -5.5], ['CASITAS', -8, 4], ['AEROPUERTO', -6.5, -3.4], ['LA COSTA', -4, 6.5], ['PLAYA OESTE', -12.3, 0.5], ['LA SIERRA', -7, -21], ['AUTOPISTA DEL SUR', -8, 3.15], ['EL LAGO', -0.8, -15.6], ['MIRADOR', -6.9, -19.5], ['VILLA OBRERA', -11.5, -2.6], ['RAMBLA', 12.6, 0.5], ['AUTOPISTA NORTE', -7, -7], ['ROJOS', -2, 2], ['AZULES', 2, -3]]) {
     g.lineWidth = 4; g.strokeStyle = '#1d1b2e'; g.strokeText(t, X(bi * P), Y(bj * P)); g.fillStyle = '#fff4e2'; g.fillText(t, X(bi * P), Y(bj * P));
   }
   g.save(); g.translate(clamp(X(player.x), 8, 792), clamp(Y(player.z), 8, 632)); g.rotate(-player.yaw);
@@ -5072,6 +5164,7 @@ let best = 0;
 try { best = +localStorage.getItem('calle-brava-best') || 0; } catch (e) {}
 const menuEl = document.getElementById('menu'), overEl = document.getElementById('over');
 function startGame() {
+  player.nivel = 0;
   initAudio(); closeRoom();
   if (player.car) { unseat(player.car); player.car = null; }
   if (player.air) { const a = player.air, r = player.rig; a.g.remove(r.g); scene.add(r.g); r.g.scale.setScalar(1); r.shadow.visible = true; player.air = null; }
@@ -5187,7 +5280,7 @@ function updatePlayer(dt) {
     if (DIRS[player.h][0] === 0) { const c = nearest(player.x), o = player.x - c; player.x = c + o + (clamp(o, -3, 3) - o) * Math.min(1, dt * 6); }
     else { const c = nearest(player.z), o = player.z - c; player.z = c + o + (clamp(o, -3, 3) - o) * Math.min(1, dt * 6); }
   }
-  clampWalk(player);
+  clampWalk(player); nivelEntidad(player, 0.4);
   pushOutOfCars(player);
 
   const moving = step > 0.0001 || back > 0;
@@ -5203,7 +5296,7 @@ function updatePlayer(dt) {
   player.h = cardinal(player.aim);
   player.yaw = angLerp(player.yaw, player.aim, Math.min(1, dt * 18));
   r.g.rotation.y = player.yaw;
-  r.g.position.set(player.x, hgt(player.x, player.z), player.z);
+  r.g.position.set(player.x, yDe(player), player.z);
 
   if (playing) {
     setTurnMode(false);
@@ -5365,7 +5458,7 @@ function drawAim() {   // the crosshair sits where a shot (or a swing) straight 
   if (aimEl.hidden !== !show) aimEl.hidden = !show;
   if (!show) return;
   const [fx, fz] = shotDir(), d = room ? 3.5 : 14, x = (room ? room.px : player.x) + fx * d, z = (room ? room.pz : player.z) + fz * d;
-  aimV.set(x, 1.5 + (room ? 0 : hgt(x, z)), z).project(camera);
+  aimV.set(x, 1.5 + (room ? 0 : player.nivel ? player.y : hgt(x, z)), z).project(camera);
   aimEl.style.left = ((aimV.x + 1) / 2 * 100) + '%'; aimEl.style.top = ((1 - aimV.y) / 2 * 100) + '%';
   aimEl.classList.toggle('gun', !!player.gun);
 }
@@ -5386,7 +5479,8 @@ function frame(now) {
     carT -= dt;
     if (carT <= 0) {
       const moving = cars.filter(c => c.state !== 'parked' && c.state !== 'player').length, parked = cars.length - moving;
-      if (moving < (curZone === 'paseo' || curZone === 'casitas' ? 2 : 5)) spawnCar(false);
+      if (player.nivel && cars.filter(c => c.state === 'au').length < 4) spawnAutoAU();
+      else if (moving < (curZone === 'paseo' || curZone === 'casitas' ? 2 : 5)) spawnCar(false);
       if (parked < 4 && Math.random() < 0.4) spawnCar(true);
       carT = rand(1.5, 3);
     }
@@ -5419,14 +5513,15 @@ function frame(now) {
     camera.lookAt(player.x + cfx * 10, ay + 1.5, player.z + cfz * 10);
   } else {
     camera.position.set(player.x - cfx * back + (Math.random() - 0.5) * shake, (drive ? 5.8 : 5.2) + (Math.random() - 0.5) * shake, player.z - cfz * back);
-    camera.position.y += hgt(player.x, player.z);
-    camera.lookAt(player.x + cfx * 8, 1.1 + hgt(player.x + cfx * 8, player.z + cfz * 8), player.z + cfz * 8);
+    const yp = yDe(player); camera.position.y += yp;
+    camera.lookAt(player.x + cfx * 8, 1.1 + (player.nivel ? yp : hgt(player.x + cfx * 8, player.z + cfz * 8)), player.z + cfz * 8);
   }
   drawAim();
   renderer.render(room ? room.scene : scene, camera);
   requestAnimationFrame(frame);
 }
 armarSierra();
+armarAutopistaSur();
 updateBlocks();
 setupCars();
 initAirport();
