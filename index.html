@@ -362,7 +362,6 @@ const COAST = 6 * P, HILL_Z = -7 * P - 20, SHORE = COAST + HALF + 32;
 const HWZ = -7 * P, HWX = 4 * P, PORT = { x0: 6 * P - HALF, x1: 10 * P + HALF, reach: 20 };
 const hwyX = (x, z) => Math.abs(x - HWX) < HALF && z > HWZ - HALF && z < COAST + HALF;
 const hwyZ = z => Math.abs(z - HWZ) < HALF;
-const onHwy = (x, z) => hwyZ(z) || hwyX(x, z);
 const inPortX = x => x > PORT.x0 && x < PORT.x1;
 const shoreAt = x => SHORE + (inPortX(x) ? PORT.reach : 0);
 function hwySide(i, j, s) {   // does this face of the block look onto a motorway?
@@ -497,7 +496,7 @@ function buildAlley(g, x0, z0, alley) {
    - manzanas: v = manzana con vereda (sin la calzada), l = lote edificable, z = zona, b = barrio
    - costa, lagos, playas: polígonos; alturas: grilla 128x128; suelo: grilla 256x256 (mar, agua, arena, pasto, cemento) */
 const MAPA = JSON.parse(document.getElementById('mapa-datos').textContent);
-const ETAPA_MAPA = 2;   // hasta dónde llegó la migración: lo que todavía depende de la cuadrícula vieja queda apagado
+const ETAPA_MAPA = 3;   // hasta dónde llegó la migración: lo que todavía depende de la cuadrícula vieja queda apagado
 const ASF = [4.5, 6.5, 11, 3.8, 0, 0, 0, 3.4], MEDIO = [9, 11, 16, 6, 0, 0, 0, 6.5];   // medio ancho de calzada y de calle con veredas, por clase (7 = pasaje del Microcentro)
 const ISLA = { x0: -2090 * MAPA.escala, z0: -2700 * MAPA.escala, size: 4000 * MAPA.escala };
 const pares = f => { const o = []; for (let k = 0; k < f.length; k += 2) o.push([f[k], f[k + 1]]); return o; };
@@ -614,6 +613,8 @@ function empujarFuera(o, pts, bb, half) {   // saca a `o` de un polígono sólid
   return true;
 }
 function clampWalk(o, lim, half = 0.4) {
+  if (o.nivel) return;   // arriba de la autopista: las barandas las maneja nivelEntidad
+  empujarPilares(o, half);
   if (!enTierra(o.x, o.z)) {   // al agua no se entra: vuelve al borde más cercano
     let [qx, qz, d] = nearestOnRing(o.x, o.z, COSTA);
     for (const L of LAGOS) { const r = nearestOnRing(o.x, o.z, L); if (r[2] < d) [qx, qz, d] = r; }
@@ -1212,6 +1213,136 @@ function armarSuelo() {
   baldosas.clear();
 }
 armarSuelo();
+/* ---------- autopistas ----------
+   Cinco autopistas y los rulos de los cuatro tréboles. Sobre la ciudad van elevadas (ALTO_AU m) y bajan con
+   rampas del 10 % donde salen al campo, así se entra y se sale por las puntas. Cada auto (y el jugador) tiene
+   un `nivel`: 0 en el suelo, 1 arriba de la autopista; arriba choca con las barandas, abajo pasa por debajo. */
+const ALTO_AU = 7.5, PENDIENTE = 0.1;
+const AU_NOMBRES = MAPA.nombres.filter(n => /^AU|CIRCUNVALACI/.test(n.t));
+const AUTOS = MAPA.autopistas.map((a, k) => {
+  const rulo = a.c === 5, hw = rulo ? 4.6 : 10, S = [];
+  for (let q = 0; q + 1 < a.p.length; q++) {   // re-muestreo cada 4 m
+    const [ax, az] = a.p[q], [bx, bz] = a.p[q + 1], n = Math.max(1, Math.ceil(Math.hypot(bx - ax, bz - az) / 4));
+    for (let j = 0; j < n; j++) S.push({ x: ax + (bx - ax) * j / n, z: az + (bz - az) * j / n });
+  }
+  S.push({ x: a.p[a.p.length - 1][0], z: a.p[a.p.length - 1][1] });
+  let s0 = 0; S.forEach((p, i) => { if (i) s0 += Math.hypot(p.x - S[i - 1].x, p.z - S[i - 1].z); p.s = s0; });
+  const dist = n => Math.min(...S.map(p => Math.hypot(n.x - p.x, n.z - p.z))), nom = rulo ? null : AU_NOMBRES.reduce((b, n) => !b || dist(n) < dist(b) ? n : b, null);
+  return { k, rulo, hw, S, len: s0, nombre: nom ? nom.t.replace('AU1 · ', '').replace('AU ', 'AUTOPISTA ') : 'AUTOPISTA' };
+});
+/* ¿pasa sobre la ciudad? entonces va elevada; las rampas se calculan como una distancia con pendiente fija */
+for (const A of AUTOS.filter(A => !A.rulo)) {
+  const f = A.S.map(p => { const c = calleAt(p.x, p.z); return (manzanaAt(p.x, p.z) || (c && c.e.c !== 3 && c.d < MEDIO[c.e.c] + 6) || sueloAt(p.x, p.z) === 4) ? ALTO_AU : 0; });
+  for (let i = 1; i < f.length; i++) f[i] = Math.max(f[i], f[i - 1] - PENDIENTE * (A.S[i].s - A.S[i - 1].s));
+  for (let i = f.length - 2; i >= 0; i--) f[i] = Math.max(f[i], f[i + 1] - PENDIENTE * (A.S[i + 1].s - A.S[i].s));
+  /* las puntas que no empalman con otra autopista bajan al suelo con rampa (por ahí se entra y se sale) */
+  for (const [i0, dir] of [[0, 1], [A.S.length - 1, -1]]) {
+    const P0 = A.S[i0], libre = !AUTOS.some(B => B !== A && !B.rulo && B.S.some(q => Math.hypot(q.x - P0.x, q.z - P0.z) < 30));
+    if (!libre) continue;
+    for (let i = i0; i >= 0 && i < f.length; i += dir) { const d = Math.abs(A.S[i].s - P0.s); if (d * PENDIENTE >= ALTO_AU) break; f[i] = Math.min(f[i], Math.max(0, d - 6) * PENDIENTE); }
+  }
+  A.S.forEach((p, i) => { p.e = f[i]; p.y = hgt(p.x, p.z) + Math.max(0.25, f[i]); });
+}
+for (const A of AUTOS.filter(A => A.rulo)) A.S.forEach(p => {   // los rulos toman la altura de la autopista más cercana
+  let by = hgt(p.x, p.z) + 0.25, bd = 1e9;
+  for (const B of AUTOS) if (!B.rulo) for (const q of B.S) { const d = Math.abs(q.x - p.x) + Math.abs(q.z - p.z); if (d < bd) { bd = d; by = q.y; } }
+  p.y = by; p.e = by - hgt(p.x, p.z);
+});
+const celdasAU = new Map();
+for (const A of AUTOS) for (let i = 0; i + 1 < A.S.length; i++) {
+  const a = A.S[i], b = A.S[i + 1], seg = { A, i, ax: a.x, az: a.z, bx: b.x, bz: b.z, ya: a.y, yb: b.y, len: Math.hypot(b.x - a.x, b.z - a.z) || 1 };
+  for (let ci = Math.floor((Math.min(a.x, b.x) - A.hw - 2) / CELDA); ci <= Math.floor((Math.max(a.x, b.x) + A.hw + 2) / CELDA); ci++)
+    for (let cj = Math.floor((Math.min(a.z, b.z) - A.hw - 2) / CELDA); cj <= Math.floor((Math.max(a.z, b.z) + A.hw + 2) / CELDA); cj++) {
+      const k = celdaKey(ci, cj); let l = celdasAU.get(k); if (!l) celdasAU.set(k, l = []); l.push(seg);
+    }
+}
+/* el tablero más cercano a (x, z), prefiriendo el que está a la altura yRef; margen = cuánto se acepta fuera del ancho */
+function deckAt(x, z, yRef, margen = 0) {
+  const l = celdasAU.get(celdaKey(Math.floor(x / CELDA), Math.floor(z / CELDA))); if (!l) return null;
+  let best = null, bs = 1e9;
+  for (const g of l) {
+    const dx = g.bx - g.ax, dz = g.bz - g.az, t = clamp(((x - g.ax) * dx + (z - g.az) * dz) / (g.len * g.len), 0, 1);
+    const px = g.ax + dx * t, pz = g.az + dz * t, d = Math.hypot(x - px, z - pz); if (d > g.A.hw + margen) continue;
+    const y = g.ya + (g.yb - g.ya) * t, score = d + (yRef === undefined ? 0 : Math.abs(y - yRef) * 3);
+    if (score < bs) { bs = score; best = { y, d, hw: g.A.hw, px, pz, dx: dx / g.len, dz: dz / g.len, A: g.A }; }
+  }
+  return best;
+}
+const onHwy = (x, z) => { const d = deckAt(x, z); return !!d && d.y - hgt(x, z) < 1 && d.d < d.hw; };
+/* sube, baja o mantiene arriba a una entidad (auto o jugador). Devuelve la normal del choque contra la baranda, si hubo */
+function nivelEntidad(o, half) {
+  const suelo = hgt(o.x, o.z);
+  if (o.nivel) {
+    const d = deckAt(o.x, o.z, o.y);
+    if (d && d.d <= d.hw - half) { o.y = d.y; return null; }
+    if (d && d.y - hgt(o.x, o.z) < 1.2) { o.nivel = 0; o.y = suelo; return null; }   // salió por una punta a nivel
+    const s = d || deckAt(o.x, o.z, o.y, 25);
+    if (!s) { o.nivel = 0; o.y = suelo; return null; }
+    let nx = o.x - s.px, nz = o.z - s.pz; const L = Math.hypot(nx, nz) || 1; nx /= L; nz /= L;
+    o.x = s.px + nx * (s.hw - half); o.z = s.pz + nz * (s.hw - half); o.y = s.y;
+    return [-nx, -nz];
+  }
+  const d = deckAt(o.x, o.z, suelo);
+  if (d && d.d <= d.hw - half && d.y - suelo < 1.0) { o.nivel = 1; o.y = d.y; return null; }
+  if (d && d.d < d.hw + half && d.y - suelo > 1.0 && d.y - suelo < 3.4) {   // por debajo de una rampa baja no se pasa: es una pared
+    let nx = o.x - d.px, nz = o.z - d.pz; const L = Math.hypot(nx, nz) || 1; nx /= L; nz /= L;
+    o.x = d.px + nx * (d.hw + half); o.z = d.pz + nz * (d.hw + half); o.y = suelo; return [nx, nz];
+  }
+  o.y = suelo; return null;
+}
+const yDe = o => o.nivel ? o.y : hgt(o.x, o.z);
+const PILARES = new Map();   // columnas debajo de los tramos elevados (obstáculos para lo que anda abajo)
+function armarAutopistas() {
+  const top = {}, add = (key, mtl) => top[key] || (top[key] = { mtl, pos: [], uv: [] });
+  const T = (b, a, c, d, ua, uc, ud) => { for (const [v, u] of [[a, ua], [c, uc], [d, ud]]) { b.pos.push(...v); b.uv.push(...u); } };
+  const matAU = new THREE.MeshLambertMaterial({ map: texOf(hwyCv, 1, 1) }); matAU.map.wrapS = matAU.map.wrapT = THREE.RepeatWrapping;
+  const matCemento = new THREE.MeshLambertMaterial({ map: wtex(concreteCv, 4), color: 0xd0ccc6 });
+  const grupo = new THREE.Group(); scene.add(grupo);
+  for (const A of AUTOS) {
+    const S = A.S, N = S.map((p, i) => { const a = S[Math.max(0, i - 1)], c = S[Math.min(S.length - 1, i + 1)], dx = c.x - a.x, dz = c.z - a.z, L = Math.hypot(dx, dz) || 1; return [dz / L, -dx / L]; });
+    const V = (i, w, dy = 0) => [S[i].x + N[i][0] * w, S[i].y + dy, S[i].z + N[i][1] * w];
+    const sup = A.rulo ? add('ru', matAsfalto) : add('au', matAU), lado = add('lado', matCemento);
+    for (let i = 0; i + 1 < S.length; i++) {
+      const hw = A.hw, u0 = S[i].s / 12, u1 = S[i + 1].s / 12, uv = (u, w) => A.rulo ? [S[u].x / 7, -S[u].z / 7] : [u === i ? u0 : u1, (w + 10) / 20];
+      const a0 = V(i, -hw, 0.05), a1 = V(i, hw, 0.05), b0 = V(i + 1, -hw, 0.05), b1 = V(i + 1, hw, 0.05);
+      const uvA0 = A.rulo ? [a0[0] / 7, -a0[2] / 7] : [u0, 0], uvA1 = A.rulo ? [a1[0] / 7, -a1[2] / 7] : [u0, 1], uvB0 = A.rulo ? [b0[0] / 7, -b0[2] / 7] : [u1, 0], uvB1 = A.rulo ? [b1[0] / 7, -b1[2] / 7] : [u1, 1];
+      T(sup, a0, b0, a1, uvA0, uvB0, uvA1); T(sup, a1, b0, b1, uvA1, uvB0, uvB1);
+      const alto = Math.min(S[i].e, S[i + 1].e);
+      if (alto > 0.8) for (const sg of [-1, 1]) {   // canto del tablero y baranda de hormigón
+        const w = sg * hw, c0 = V(i, w, -0.9), c1 = V(i + 1, w, -0.9), d0 = V(i, w, 0.05), d1 = V(i + 1, w, 0.05), e0 = V(i, w, 1.0), e1 = V(i + 1, w, 1.0);
+        const q = (p0, p1, p2, p3) => { T(lado, p0, p1, p2, [0, 0], [S[i + 1].s / 4 - S[i].s / 4, 0], [0, 1]); T(lado, p2, p1, p3, [0, 1], [S[i + 1].s / 4 - S[i].s / 4, 0], [S[i + 1].s / 4 - S[i].s / 4, 1]); };
+        q(c0, c1, e0, e1);   // cara de afuera (del canto hasta arriba de la baranda)
+        const f0 = V(i, w - sg * 0.3, 0.05), f1 = V(i + 1, w - sg * 0.3, 0.05), g0 = V(i, w - sg * 0.3, 1.0), g1 = V(i + 1, w - sg * 0.3, 1.0);
+        q(f0, f1, g0, g1); q(g0, g1, e0, e1);   // cara de adentro y tapa
+        const h0 = V(i, -hw, -0.9), h1 = V(i + 1, -hw, -0.9), k0 = V(i, hw, -0.9), k1 = V(i + 1, hw, -0.9);
+        if (sg > 0) { T(lado, h0, k0, h1, [0, 0], [1, 0], [0, 1]); T(lado, k0, k1, h1, [1, 0], [1, 1], [0, 1]); }   // panza
+      }
+    }
+    /* pilares cada ~24 m donde va alto, nunca sobre la calzada de una calle */
+    for (let i = 3; i < S.length - 3; i += 6) {
+      if (S[i].e < 3) continue;
+      for (const w of A.rulo ? [0] : [-6, 6]) {
+        const x = S[i].x + N[i][0] * w, z = S[i].z + N[i][1] * w; if (enCalzada(x, z, 1.2) || !enTierra(x, z)) continue;
+        const g0 = hgt(x, z), h = S[i].y - 0.9 - g0, col = box(1.3, h, 1.3, matCemento); col.position.set(x, g0 + h / 2, z); grupo.add(col);
+        const k = celdaKey(Math.floor(x / CELDA), Math.floor(z / CELDA)); let l = PILARES.get(k); if (!l) PILARES.set(k, l = []); l.push({ x, z });
+      }
+    }
+    /* carteles verdes cada ~280 m en los tramos principales */
+    if (!A.rulo) for (let i = 40, n = 0; i < S.length - 20; i += 70, n++) {
+      const gg = new THREE.Group(); gantry(gg, 0, 0, false, A.k * 3 + n); gg.position.set(S[i].x, S[i].y, S[i].z); gg.rotation.y = Math.atan2(N[i][0], N[i][1]) + PI / 2; grupo.add(gg);
+    }
+  }
+  for (const k in top) {
+    const b = top[k], g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(b.pos, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(b.uv, 2)); g.computeVertexNormals();
+    const m = new THREE.Mesh(g, b.mtl); if (k === 'lado') m.material.side = THREE.DoubleSide; grupo.add(m);
+  }
+}
+function empujarPilares(o, half) {
+  const l = PILARES.get(celdaKey(Math.floor(o.x / CELDA), Math.floor(o.z / CELDA))); if (!l) return;
+  for (const p of l) { const d = Math.hypot(o.x - p.x, o.z - p.z), r = 0.9 + half; if (d < r && d > 1e-4) { o.x = p.x + (o.x - p.x) / d * r; o.z = p.z + (o.z - p.z) / d * r; } }
+}
+
 /* el mar: un plano grande que sigue al jugador, por debajo del nivel de la costa */
 const seaTex = texOf(waterCv, 1, 1);
 const sea = new THREE.Mesh(new THREE.PlaneGeometry(900, 900), new THREE.MeshLambertMaterial({ map: seaTex, color: 0xbfe6ff })); sea.rotation.x = -PI / 2; sea.position.y = -0.7; scene.add(sea);
@@ -1889,6 +2020,11 @@ for (const m of MANZANAS) {
     const borde = lados.filter(l => l[0]).sort((p, q) => p[3] - q[3])[0], [fx, fz] = borde ? [borde[1], borde[2]] : [vx, vz];
     const alongV = Math.abs(fx * vx + fz * vz) > 0.5, ancho = alongV ? cw : cd, fondo = alongV ? cd : cw;
     const th = Math.atan2(fx, fz);
+    { // debajo de una autopista no se construye: la celda queda como explanada
+      const hu = cw / 2 + 2, hv = cd / 2 + 2; let tapa = false;
+      for (const [su, sv] of [[0, 0], [-1, -1], [1, -1], [-1, 1], [1, 1], [0, -1], [0, 1], [-1, 0], [1, 0]]) { const px = x + ux * su * hu + vx * sv * hv, pz = z + uz * su * hu + vz * sv * hv; if (deckAt(px, pz, undefined, 5)) { tapa = true; break; } }
+      if (tapa) continue;
+    }
     CELDAS.push({ m, n: m.celdas.length, x, z, th, c: Math.cos(th), s: Math.sin(th), sx: ancho / 28, sz: fondo / 28, borde: !!borde, zona: m.zona });
     m.celdas.push(CELDAS[CELDAS.length - 1]);
   }
@@ -2395,6 +2531,7 @@ const ZONE_NAMES = { puerto: 'EL PUERTO', industrial: 'ZONA INDUSTRIAL', autopis
 let curZone = null, curTurf = null;
 let curPlace = null;
 function placeName() {   // { key: tipo de zona del juego, name: lo que dice el cartel }
+  if (player.nivel) { const d = deckAt(player.x, player.z, player.y, 3); return { key: 'autopista', name: d ? d.A.nombre : 'AUTOPISTA' }; }
   const m = zonaMapa(player.x, player.z);
   if (m) return { key: m.zona, name: m.zona === 'plaza' ? 'PLAZA · ' + m.barrio : m.barrio };
   const s = sueloAt(player.x, player.z);
@@ -2643,7 +2780,7 @@ function exitCar() {
   if (challenge) declineRace();
   const out = unseat(c);
   c.state = 'parked'; player.car = null; player.gas = false; input.brake = false; bF.classList.remove('on');
-  player.x = out.x; player.z = out.z; clampWalk(player);
+  player.nivel = c.nivel || 0; player.y = c.y; player.x = out.x; player.z = out.z; clampWalk(player); nivelEntidad(player, 0.4);
   player.h = cardinal(c.th); player.yaw = player.aim = c.th; player.rig.g.rotation.y = c.th;
   updateAttackBtn(); updateShootBtn(); kLab.textContent = 'PATADA'; carHintT = 0; sfx('door');
 }
@@ -2766,7 +2903,7 @@ function updateCars(dt) {
     if (Math.abs(c.speed) > 3 && state === 'play') {
       const sg = Math.sign(c.speed);
       for (const p of peds) {
-        if (p.state === 'ko') continue;
+        if (p.state === 'ko' || (p.nivel || 0) !== (c.nivel || 0)) continue;
         const ox = p.x - c.x, oz = p.z - c.z, ah = ox * fx + oz * fz, sd = ox * rx + oz * rz;
         if (Math.abs(ah) < c.hl && Math.abs(sd) < c.hw) {
           pop('¡PUM!', p.x, 2.2, p.z); sfx('crash');
@@ -2775,7 +2912,7 @@ function updateCars(dt) {
           c.speed *= 0.85;
         }
       }
-      if (!player.car && !player.air && !player.down && player.invuln <= 0) {
+      if (!player.car && !player.air && !player.down && player.invuln <= 0 && (player.nivel || 0) === (c.nivel || 0)) {
         const ox = player.x - c.x, oz = player.z - c.z, ah = ox * fx + oz * fz, sd = ox * rx + oz * rz;
         if (Math.abs(ah) < c.hl && Math.abs(sd) < c.hw) {
           const s = Math.sign(sd) || 1; player.x += rx * s * 2.4; player.z += rz * s * 2.4; clampWalk(player);
@@ -2784,13 +2921,16 @@ function updateCars(dt) {
         }
       }
     }
+    { const n = nivelEntidad(c, c.hw); if (n) { const hit = bounceOff(c, n[0], n[1], c.x - n[0] * c.hw, c.z - n[1] * c.hw, 0.25); if (hit > 4) { sfx('crash'); if (c.state === 'player') shake = Math.max(shake, Math.min(0.4, hit * 0.03)); } if (hit > 5) damageCar(c, (hit - 5) * 2, c.state === 'player'); } }
+    if (player.car === c) { player.nivel = c.nivel; player.y = c.y; }
     carSmoke(c, dt);
     const visT = c.state === 'player' ? 0 : clamp(-c.latV * 0.12, -0.35, 0.35) * (c.speed < 0 ? -1 : 1);
     c.vis += (visT - c.vis) * Math.min(1, dt * 8);
     wallCollide(c);
     if (c.state === 'player') { player.x = c.x; player.z = c.z; }
     if (player.car === c) { player.x = c.x; player.z = c.z; }
-    const hf = hgt(c.x + fx * c.hl, c.z + fz * c.hl), hb = hgt(c.x - fx * c.hl, c.z - fz * c.hl);
+    const alt = (x, z) => { if (!c.nivel) return hgt(x, z); const d = deckAt(x, z, c.y, 3); return d ? d.y : c.y; };
+    const hf = alt(c.x + fx * c.hl, c.z + fz * c.hl), hb = alt(c.x - fx * c.hl, c.z - fz * c.hl);
     let rollT = 0;
     if (c.spec.moto) {
       if (c.state === 'player') rollT = -(input.r - input.l) * 0.42 * clamp(c.speed / 8, 0, 1);
@@ -2833,7 +2973,7 @@ function wallCollide(c) {
   }
 }
 function collideCars(a, b) {
-  if (Math.abs(a.x - b.x) > 7 || Math.abs(a.z - b.z) > 7) return;
+  if (Math.abs(a.x - b.x) > 7 || Math.abs(a.z - b.z) > 7 || (a.nivel || 0) !== (b.nivel || 0)) return;
   const [afx, afz] = carF(a), [bfx, bfz] = carF(b);
   const ka = Math.max(0, a.hl - a.hw), kb = Math.max(0, b.hl - b.hw), ra = a.hw * 0.95, rb = b.hw * 0.95;
   let best = null;
@@ -5234,6 +5374,7 @@ function startGame() {
   equip(null); dropGun(); resetJob(); resetRace(); resetWorldThreats(); drawHearts();
   menuEl.hidden = true; overEl.hidden = true; shopOv.hidden = true; state = 'play';
   player.walking = false; input.back = input.fwd = false; bF.classList.remove('on');
+  player.nivel = 0;
   if (ETAPA_MAPA < 4) { player.x = INICIO.x; player.z = INICIO.z; player.yaw = player.aim = camYaw = INICIO.yaw; const s = INICIO.at(INICIO.r0 + 13, ASF[INICIO.e.c] + 2.4); dropPickup('palo', s.x, s.z); }
   else { const s = streetSpot(5, lateralOf(player.x, player.z, DIRS[player.h][0]) - 1.2); dropPickup('palo', s.x, s.z); }
   setupCars(); carT = 2; curZone = null;
@@ -5333,7 +5474,7 @@ function updatePlayer(dt) {
     if (DIRS[player.h][0] === 0) { const c = nearest(player.x), o = player.x - c; player.x = c + o + (clamp(o, -3, 3) - o) * Math.min(1, dt * 6); }
     else { const c = nearest(player.z), o = player.z - c; player.z = c + o + (clamp(o, -3, 3) - o) * Math.min(1, dt * 6); }
   }
-  clampWalk(player);
+  clampWalk(player); nivelEntidad(player, 0.4);
   pushOutOfCars(player);
 
   const moving = step > 0.0001 || back > 0;
@@ -5349,7 +5490,7 @@ function updatePlayer(dt) {
   player.h = cardinal(player.aim);
   player.yaw = angLerp(player.yaw, player.aim, Math.min(1, dt * 18));
   r.g.rotation.y = player.yaw;
-  r.g.position.set(player.x, hgt(player.x, player.z), player.z);
+  r.g.position.set(player.x, yDe(player), player.z);
 
   if (playing) {
     setTurnMode(false);
@@ -5507,7 +5648,7 @@ function drawAim() {   // the crosshair sits where a shot (or a swing) straight 
   if (aimEl.hidden !== !show) aimEl.hidden = !show;
   if (!show) return;
   const [fx, fz] = shotDir(), d = room ? 3.5 : 14, x = (room ? room.px : player.x) + fx * d, z = (room ? room.pz : player.z) + fz * d;
-  aimV.set(x, 1.5 + (room ? 0 : hgt(x, z)), z).project(camera);
+  aimV.set(x, 1.5 + (room ? 0 : player.nivel ? player.y : hgt(x, z)), z).project(camera);
   aimEl.style.left = ((aimV.x + 1) / 2 * 100) + '%'; aimEl.style.top = ((1 - aimV.y) / 2 * 100) + '%';
   aimEl.classList.toggle('gun', !!player.gun);
 }
@@ -5562,14 +5703,15 @@ function frame(now) {
     camera.lookAt(player.x + cfx * 10, ay + 1.5, player.z + cfz * 10);
   } else {
     camera.position.set(player.x - cfx * back + (Math.random() - 0.5) * shake, (drive ? 5.8 : 5.2) + (Math.random() - 0.5) * shake, player.z - cfz * back);
-    camera.position.y += hgt(player.x, player.z);
-    camera.lookAt(player.x + cfx * 8, 1.1 + hgt(player.x + cfx * 8, player.z + cfz * 8), player.z + cfz * 8);
+    const yp = yDe(player); camera.position.y += yp;
+    camera.lookAt(player.x + cfx * 8, 1.1 + (player.nivel ? yp : hgt(player.x + cfx * 8, player.z + cfz * 8)), player.z + cfz * 8);
   }
   drawAim();
   renderer.render(room ? room.scene : scene, camera);
   requestAnimationFrame(frame);
 }
 asignarCeldas();
+armarAutopistas();
 if (ETAPA_MAPA >= 2) updateBlocks();
 setupCars();
 if (ETAPA_MAPA >= 6) { initAirport(); initPort(); }
