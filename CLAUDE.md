@@ -13,6 +13,8 @@ Juego 3D de calle en el navegador. Todo el juego vive en **un solo archivo: `ind
 - Todo el texto del juego en **español rioplatense** (voseo: "tocá", "rajá", "apuntá").
 - Nada de marcas, logos ni nombres de empresas reales (los bancos son "Banco de Barrio", "Banco del Sur", "Banco del Plata").
 - Forma de trabajo pedida: probar en un navegador local antes de publicar y contar qué se probó y qué no.
+- Publicar = commit + push a `main`; después confirmar el deploy con la API (`repos/jedbweb-ai/calle-brava/actions/runs`, "pages build and deployment": success), porque github.io no se puede abrir desde la nube.
+- Crédito del autor: "Creado por Julián Domenech" con link a https://juliandomenech.com (pestaña nueva), al pie del menú de Pausa/Opciones (`.credit`). No sacarlo.
 
 ## Cómo probar localmente
 
@@ -30,7 +32,7 @@ renderer y texturas en canvas → edificios por zona (`buildCentro`, `buildTower
 autos → efectos/sonido (`sfx`) → combate (`startAttack`, `resolveHit`, `poseAttack`) → HUD/minimapa/mapa grande → input →
 armería → armas de fuego → picadas → bandas → policía (`addHeat`, `policeDrive`, `updatePolice`, `dispatches`) → helicóptero →
 aeropuerto/aviones → **negocios y robos** (`BIZ`, `bizOf`, `buildRoom`, `enterBiz`/`leaveBiz`, `startHeist`, `updateRoom*`) →
-pausa/opciones → estado de juego → `frame()`.
+**trabajos** (`JOB_INFO`, `jobSpot`, `updateJob`, ambulancia) → pausa/opciones → estado de juego → `frame()`.
 
 ## Cómo está hecho hoy (decisiones ya tomadas)
 
@@ -52,6 +54,7 @@ pausa/opciones → estado de juego → `frame()`.
   Hospitales: 3 por sorteo al este + 2 fijos al oeste (`HOSPITALS`: barrio `(-5,-3)` y centro `(-2,-5)`).
 - **Policía:** solo persigue si un policía te ve (o sospecha que se borra sola). Patrulleros: 10,5 + 1,2 × nivel, aceleración 8.
   **Helicóptero** (nivel 3) desactivable en Opciones (`settings.heli`).
+- **Difusión:** se hizo una imagen promocional para historia de Instagram con ChatGPT (estilo póster de mundo abierto) a partir de capturas verticales sin HUD; para capturas nuevas, ocultar `#hud,#controls,#hint,#zone,#aim,#raceNav,#heist,#enter,.pop` y usar 540×960 con deviceScaleFactor 2.
 - Opciones guardadas en `localStorage['calle-brava-settings']`; récord en `localStorage['calle-brava-best']`.
 
 ## Pendiente / ideas acordadas para más adelante
