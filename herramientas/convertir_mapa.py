@@ -58,6 +58,11 @@ def con_fill(svg, color):
     return [puntos(d) for d in re.findall(r'<path d="([^"]*)" fill="%s"' % re.escape(color), svg)]
 
 
+def scale_geom(g, k):
+    from shapely import affinity
+    return affinity.scale(g, xfact=k, yfact=k, origin=(0, 0))
+
+
 def main():
     raw = open(os.path.join(MAPA, 'atlas_sin_textos.svg')).read()
     fondo_b64 = re.search(r'href="data:image/png;base64,([^"]*)"', raw).group(1)
@@ -333,19 +338,27 @@ def main():
     urbana = [Polygon(p) for p in sueltos(svg, 'fill="#e6e2da"')]
     red = unary_union([LineString(e['p']) for e in aristas])
     calzadas = unary_union([LineString(e['p']).buffer(MEDIO[e['c']] / ESCALA, cap_style=1, join_style=1) for e in aristas])
-    manzanas, plazoletas = [], []
+    ASFALTO = {CALLE: 4.5, AVENIDA: 7.5, BULEVAR: 11, RURAL: 3.8}     # medio ancho de la calzada (sin vereda)
+    asfalto = unary_union([LineString(e['p']).buffer(ASFALTO[e['c']] / ESCALA, cap_style=1, join_style=1) for e in aristas])
+    manzanas, plazoletas = [], []           # cada una: (vereda+lote, lote)
     for poly in polygonize(red):
         if poly.area * ESCALA * ESCALA > 80000:
             continue      # el "afuera" de barrios enteros (campo entre rutas)
-        adentro = poly.difference(calzadas)
-        partes = [g for g in (adentro.geoms if hasattr(adentro, 'geoms') else [adentro]) if g.geom_type == 'Polygon']
-        if not partes:
+        def mayor(geo):
+            ps = [g for g in (geo.geoms if hasattr(geo, 'geoms') else [geo]) if g.geom_type == 'Polygon']
+            return max(ps, key=lambda q: q.area) if ps else None
+        vereda = mayor(poly.difference(asfalto))
+        if vereda is None or vereda.area * ESCALA * ESCALA < 40:
             continue
-        g = max(partes, key=lambda q: q.area).simplify(1.0)
-        a = g.area * ESCALA * ESCALA
-        if a < 60:
-            continue
-        (manzanas if a >= 250 else plazoletas).append(g)
+        vereda = Polygon(vereda.exterior).simplify(0.6)
+        lote = mayor(poly.difference(calzadas))
+        if lote is not None:
+            lote = Polygon(lote.exterior).simplify(1.0)
+        a = lote.area * ESCALA * ESCALA if lote is not None else 0
+        if a >= 250:
+            manzanas.append((vereda, lote))
+        else:
+            plazoletas.append(vereda)
 
     # ---------------- autopistas, rulos, vías ----------------
     def lista(ps, cl):
@@ -385,9 +398,28 @@ def main():
               for p in (pl.geoms if hasattr(pl, 'geoms') else [pl]) if p.area > 30]
 
     # ---------------- alturas ----------------
-    H = 128
-    alt = Image.open(os.path.join(MAPA, 'alturas.webp')).convert('L').resize((H, H), Image.BILINEAR)
-    alturas = np.asarray(alt).astype(int).flatten().tolist()
+    # El mapa de alturas cubre los 4000 x 4000 del SVG. La ciudad (menos Las Lomas), el puerto y el
+    # aeropuerto se aplanan a 0 con una transición suave; el resto sube hasta HMAX metros.
+    H, HMAX = 128, 110
+    alt = np.asarray(Image.open(os.path.join(MAPA, 'alturas.webp')).convert('L').resize((H, H), Image.BILINEAR)).astype(float)
+    pistas_svg = [Polygon(p) for p in sueltos(svg, 'fill="#4c4f55"')] + [Polygon(p) for p in con_fill(svg, '#7d8fa8')]
+    lomas = [k for k, (v, l) in enumerate(manzanas)]   # se completa más abajo con la zona
+    gris = (abs(r - 214) < 14) & (abs(g - 211) < 14) & (abs(b - 204) < 14)    # el cemento del fondo (ciudad, puerto)
+    gris_geo = scale_geom(mascara_a_poligono(gris).buffer(-1).buffer(1.5), 10)
+    plano = unary_union(urbana + [gris_geo] + [p.buffer(60) for p in pistas_svg] + [Polygon(p) for p in sueltos(svg, 'fill="#b8b8b4"')])
+    def mascara(geo, n):
+        m = np.zeros((n, n))
+        paso = 4000 / n
+        for j in range(n):
+            for i in range(n):
+                if geo.contains(Point((i + 0.5) * paso, (j + 0.5) * paso)):
+                    m[j, i] = 1
+        return m
+    def suavizar(m, veces):
+        for _ in range(veces):
+            p_ = np.pad(m, 1, mode='edge')
+            m = sum(p_[1 + dy:1 + dy + m.shape[0], 1 + dx:1 + dx + m.shape[1]] for dy in (-1, 0, 1) for dx in (-1, 0, 1)) / 9
+        return m
 
     # ---------------- detalles ----------------
     def polys(color):
@@ -425,8 +457,8 @@ def main():
     }
     carteles = [n for n in json.load(open(os.path.join(MAPA, 'nombres.json'))) if n['t'] in TIPO]
     barrios = [n['t'] for n in carteles]
-    def barrio_de(poly):
-        c = poly.representative_point()
+    def barrio_de(par):
+        c = par[1].representative_point()
         madera = [u for u in urbana if u.bounds[0] > 3000]          # la franja de Puerto Madera (2º polígono urbano)
         if madera and madera[0].contains(c):
             return barrios.index('PUERTO MADERA')
@@ -434,22 +466,76 @@ def main():
         return min(cands, key=lambda k: math.hypot(carteles[k]['x'] - c.x, carteles[k]['y'] - c.y))
     zona_manzana = [barrio_de(p) for p in manzanas]
 
+    # Las Lomas no se aplana (la loma sube de verdad)
+    tipos = [TIPO[barrios[z]] for z in zona_manzana]
+    lomas_geo = unary_union([manzanas[k][0] for k in range(len(manzanas)) if tipos[k] == 'colina']).convex_hull.buffer(40)
+    plano_sin_lomas = plano.difference(lomas_geo)
+    mplano = np.maximum(suavizar(mascara(plano_sin_lomas, H), 2), mascara(plano_sin_lomas.buffer(-30), H))
+    alturas = np.round(alt * (1 - np.clip(mplano, 0, 1))).astype(int)
+    # en la loma, piso mínimo para que no queden pozos raros
+    alturas = alturas.flatten().tolist()
+
+    # ---------------- tipo de suelo (grilla de 256 x 256 sobre el SVG) ----------------
+    # 0 mar, 1 agua dulce, 2 arena, 3 pasto, 4 ciudad (cemento)
+    NS = 256
+    px2 = np.asarray(fondo.resize((NS, NS), Image.BILINEAR)).astype(int)
+    r2, g2, b2 = px2[..., 0], px2[..., 1], px2[..., 2]
+    agua2 = (b2 > r2 + 35) & (b2 > g2 + 5)
+    arena2 = (~agua2) & (r2 > 225) & (g2 > 205) & (r2 - b2 > 40)
+    suelo = np.full((NS, NS), 3)
+    ciudad = mascara(plano_sin_lomas.buffer(-4), NS)
+    suelo[ciudad > 0] = 4
+    suelo[arena2] = 2
+    mar_svg = scale_geom(mar, 10)
+    paso = 4000 / NS
+    for j in range(NS):
+        for i in range(NS):
+            if agua2[j, i]:
+                suelo[j, i] = 0 if mar_svg.contains(Point((i + 0.5) * paso, (j + 0.5) * paso)) else 1
+    plano_rle, prev, cuenta = [], None, 0
+    for v in suelo.flatten().tolist():
+        if v == prev:
+            cuenta += 1
+        else:
+            if prev is not None:
+                plano_rle.append('%d%s' % (cuenta, 'masgc'[prev]))
+            prev, cuenta = v, 1
+    plano_rle.append('%d%s' % (cuenta, 'masgc'[prev]))
+
+    # plazas: lotes que son casi todo parque en el atlas
+    verde = unary_union([Polygon(p) for p in con_fill(svg, '#9fcd7c')] + [Polygon(p) for p in sueltos(svg, 'fill="#8cc06b"')]).buffer(0)
+    zonas = []
+    for k, (v, l) in enumerate(manzanas):
+        z = tipos[k]
+        if l.intersection(verde).area > 0.4 * l.area:
+            z = 'plaza'
+        zonas.append(z)
+
     datos = {
         'escala': ESCALA, 'origen': ORIGEN, 'clases': NOMBRE_CLASE,
         'nodos': [M(*n) for n in nodos],
         'aristas': [[e['a'], e['b'], e['c'], [v for q in e['p'] for v in M(*q)]] for e in aristas],
         'autopistas': lista(autopistas, AUTOPISTA) + lista(rulos, RULO),
         'vias': lista(vias, VIA),
-        'manzanas': [[v for q in list(p.exterior.coords)[:-1] for v in M(*q)] for p in manzanas],
+        'manzanas': [{'v': [v for q in list(ve.exterior.coords)[:-1] for v in M(*q)], 'l': [v for q in list(lo.exterior.coords)[:-1] for v in M(*q)], 'z': zonas[k], 'b': zona_manzana[k]} for k, (ve, lo) in enumerate(manzanas)],
         'barrios': [{'n': b, 'tipo': TIPO[b], 'x': M(carteles[k]['x'], carteles[k]['y'])[0], 'z': M(carteles[k]['x'], carteles[k]['y'])[1]} for k, b in enumerate(barrios)],
-        'barrio_manzana': zona_manzana,
         'plazoletas': [[v for q in list(p.exterior.coords)[:-1] for v in M(*q)] for p in plazoletas],
         'costa': costa, 'lagos': lagos, 'playas': playas,
-        'alturas': {'n': H, 'v': alturas},
+        'alturas': {'n': H, 'max': HMAX, 'v': alturas},
+        'suelo': {'n': NS, 'rle': ''.join(plano_rle)},
         'detalles': det, 'nombres': nombres,
     }
     out = os.path.join(MAPA, 'datos.json')
     json.dump(datos, open(out, 'w'), separators=(',', ':'), ensure_ascii=False)
+    # copia compacta adentro de index.html (sin los nombres de las clases ni el origen)
+    juego = {k: v for k, v in datos.items() if k not in ('origen', 'clases')}
+    texto = json.dumps(juego, separators=(',', ':'), ensure_ascii=False)
+    html_path = os.path.join(AQUI, '..', 'index.html')
+    html = open(html_path, encoding='utf-8').read()
+    html, n = re.subn(r'(<script id="mapa-datos" type="application/json">).*?(</script>)', lambda m: m.group(1) + texto + m.group(2), html, flags=re.S)
+    if n == 1:
+        open(html_path, 'w', encoding='utf-8').write(html)
+        print('incrustado en index.html', len(texto) // 1024, 'KB')
     gr = defaultdict(int)
     for e in aristas:
         gr[e['a']] += 1; gr[e['b']] += 1
