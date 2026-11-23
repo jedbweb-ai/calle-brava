@@ -45,6 +45,11 @@ pausa/opciones → estado de juego → `frame()`.
   Alarma según `BIZ[kind].alarm` → llegan policías adentro; al salir: búsqueda, o sospecha + patrullero despachado al local. Local robado cerrado 150 s.
 - **Predios caminables** (iglesia, hospital, escuela, bancos, nafta, súper, zona industrial y patios del puerto): solo bloquea lo que tiene volumen (`lotObs`).
   Industrial y puerto se arman al azar, así que sus obstáculos (galpones, contenedores, tanques, chimeneas, cercas) se guardan en `yardObs` al construir la cuadra.
+- **Trabajos (taxi y ambulancia)**, sección `jobs` (`JOB_INFO`, `offerJob`, `updateJob`, `drawJob`): al subir a un taxi o ambulancia se ofrece un turno (diálogo `#jobDlg`).
+  Cada llamada: punto en una vereda (`jobSpot`), luz amarilla (`beam`, compartida con las picadas) y flecha en `#raceNav`; frenar a menos de 8 m sube al pasajero/herido.
+  Taxi: destino al azar 140–330 m, tarifa 25 + 0,22/m, propina 30 % si llegás rápido y sin chocar (`jobBump`). Ambulancia: herido tirado + alguien pidiendo ayuda, tiempo límite, siempre al hospital más cercano (`nearestHospital`), 70 + 0,35/m.
+  Bajarse del vehículo termina el turno. Ambulancia = tipo de auto `ambulancia` (estacionada bajo el techito de cada hospital por `parkAmbulances`, y alguna en el tránsito). Las picadas no aparecen durante un turno.
+  Hospitales: 3 por sorteo al este + 2 fijos al oeste (`HOSPITALS`: barrio `(-5,-3)` y centro `(-2,-5)`).
 - **Policía:** solo persigue si un policía te ve (o sospecha que se borra sola). Patrulleros: 10,5 + 1,2 × nivel, aceleración 8.
   **Helicóptero** (nivel 3) desactivable en Opciones (`settings.heli`).
 - Opciones guardadas en `localStorage['calle-brava-settings']`; récord en `localStorage['calle-brava-best']`.
@@ -54,4 +59,5 @@ pausa/opciones → estado de juego → `frame()`.
 - [ ] **Helicóptero divertido:** hoy solo se lo pierde metiéndose en callejones. Pensar formas de escapar o pelearlo (esconderse bajo techos/túneles, derribarlo, que se vaya tras un tiempo, etc.).
 - [ ] **Dificultad de la policía:** seguir afinando con juego real (ya se bajó la velocidad de patrulleros).
 - [ ] Opcional: abrir los jardines de barrio residencial y casitas (hoy cerrados por ligustrinas/cercas).
+- [ ] Ideas para trabajos: más tipos (policía, bomberos, delivery), racha de viajes con bonus, que los heridos aparezcan después de peleas reales.
 - [ ] No probado aún: arrastre táctil en celular real, metralleta dentro de los locales, rendimiento en celulares de gama baja (súper y banco grande tienen muchos objetos), entrar con auto a los predios abiertos.

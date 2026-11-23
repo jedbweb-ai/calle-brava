@@ -248,6 +248,7 @@ body.menu-open #hud,body.menu-open #controls,body.menu-open #hint,body.menu-open
       <span class="chip k">POLICÍA</span><span>Hay patrullas caminando y tres comisarías (cuadrado azul en el mapa). Solo te persiguen si te ven delinquir o te reconocen poco después. Escondete en los callejones. En nivel 3 llega el helicóptero (lo podés desactivar en Opciones)</span>
       <span class="chip c">ROBO</span><span>Kioscos, almacenes, farmacias, joyerías, casas de cambio, minimercados, supers y tres bancos (el $ verde del mapa). Entrá, pegale a alguien o apuntá con el arma y te dan la plata: quedate cerca del mostrador hasta que te den todo. Unos se tiran al piso, otros huyen y otros pelean. Si suena la alarma llega la policía; en los bancos suena siempre y hay guardias armados</span>
       <span class="chip m">PICADA</span><span>Manejando, a veces te desafían a una carrera. Seguí las flechas hasta la meta</span>
+      <span class="chip c">TRABAJOS</span><span>Subite a un taxi o a una ambulancia (hay una en cada hospital) y te ofrecen un turno. Seguí la flecha y la luz amarilla, frená al lado de la persona para que suba y llevala a destino antes de que se acabe el tiempo. En el taxi, si llegás rápido y sin chocar, hay propina</span>
     </div>
     <p>La ciudad: microcentro al este, paseo turístico y el puerto al sudeste, zona industrial más allá, barrios y aeropuerto al oeste, mansiones en la loma al norte, la playa al sur. Dos autopistas la cruzan. Tocá el minimapa (o la tecla M) para ver el mapa completo.</p>
     <span class="keys">Teclado: W caminar/acelerar · S atrás/freno · A D o ← → costado y volante (dos toques: girar) · arrastrar el mouse: mirar y apuntar · J piña (auto: freno, avión: subir) · K patada (avión: bajar) · E entrar o salir · F subir/bajar · L disparar · R recargar · P pausa</span>
@@ -282,6 +283,14 @@ body.menu-open #hud,body.menu-open #controls,body.menu-open #hint,body.menu-open
     </div>
     <div class="items" id="items"></div>
     <button id="leave" class="big">VOLVER A LA CALLE</button>
+  </div>
+</div>
+<div id="jobDlg" class="overlay" hidden>
+  <div class="card">
+    <h2 id="jobTitle">¡Trabajo de taxista!</h2>
+    <p id="jobText"></p>
+    <button id="jobYes" class="big">EMPEZAR A TRABAJAR</button>
+    <button id="jobNo" class="big ghost">AHORA NO</button>
   </div>
 </div>
 <div id="dialog" class="overlay" hidden>
@@ -376,7 +385,7 @@ const zoneAt = (x, z) => zoneOf(Math.floor(x / P), Math.floor(z / P));
 /* Some blocks hold a single public building instead of the usual four lots. */
 const SPECIALS = { centro: ['iglesia', 'hospital', 'escuela', 'super', 'nafta'], barrio: ['escuela', 'nafta', 'super'], torres: ['hospital', 'nafta'], paseo: ['iglesia'] };
 function specialOf(i, j) {
-  const bank = BANKS[i + ',' + j]; if (bank) return bank;
+  const fixed = BANKS[i + ',' + j] || HOSPITALS[i + ',' + j]; if (fixed) return fixed;
   const list = SPECIALS[zoneOf(i, j)]; if (!list || stationAt(i, j) || (i === 0 && j === -1)) return null;
   const h = hash(i * 11 + 5, j * 17 + 3); return h % 6 === 0 ? list[(h >> 5) % list.length] : null;
 }
@@ -2092,12 +2101,13 @@ Object.assign(CAR_TYPES, {
   moto:    { name: 'Moto',           w: 9, max: 17, acc: 10, steer: 2.8, cruise: [8, 11],  hl: 1.15, hw: 0.55, moto: true, seat: { y: 0.12, z: 0.3, s: 0.9 } },
   motoDep: { name: 'Moto deportiva', w: 6, max: 25, acc: 15, steer: 3.0, cruise: [11, 14], hl: 1.2,  hw: 0.55, moto: true, seat: { y: 0.16, z: 0.25, s: 0.9 } }
 });
-const MASS = { taxi: 1, colectivo: 3, policia: 1.2, comun: 1, viejo: 0.85, camioneta: 1.6, jeep: 1.4, deportivo: 1, descapotable: 0.95, superauto: 1, moto: 0.35, motoDep: 0.4 };
+CAR_TYPES.ambulancia = { name: 'Ambulancia', w: 2, max: 17, acc: 8, steer: 2.1, cruise: [8, 10], hl: 2.7, hw: 1.2, seat: { y: 0.2, z: -1.4, s: 0.9 }, colors: [0xf4f1ea] };
+const MASS = { ambulancia: 1.6, taxi: 1, colectivo: 3, policia: 1.2, comun: 1, viejo: 0.85, camioneta: 1.6, jeep: 1.4, deportivo: 1, descapotable: 0.95, superauto: 1, moto: 0.35, motoDep: 0.4 };
 for (const k in MASS) CAR_TYPES[k].m = MASS[k];
 const ZONE_CARS = {
   colina: { superauto: 25, deportivo: 25, descapotable: 20, jeep: 15, comun: 15, motoDep: 15 },
   barrio: { viejo: 25, comun: 35, camioneta: 25, jeep: 15, moto: 15, colectivo: 8, taxi: 6 },
-  torres: { taxi: 22, colectivo: 12, comun: 30, deportivo: 25, descapotable: 15, superauto: 10, camioneta: 20, motoDep: 10, moto: 8 },
+  torres: { ambulancia: 3, taxi: 22, colectivo: 12, comun: 30, deportivo: 25, descapotable: 15, superauto: 10, camioneta: 20, motoDep: 10, moto: 8 },
   casitas: { viejo: 40, comun: 40, camioneta: 20, moto: 15 },
   paseo: { taxi: 18, colectivo: 8, descapotable: 30, comun: 30, viejo: 20, deportivo: 20, moto: 15 },
   puerto: { camioneta: 45, viejo: 20, comun: 25, jeep: 10 }, industrial: { camioneta: 45, viejo: 25, comun: 20, jeep: 10 }
@@ -2150,6 +2160,11 @@ function buildCar(g, type, bm, skin) {
     add(0.22, 0.16, 0.06, headMat, 0, 0.98, -0.86); add(0.2, 0.1, 0.06, tailMat, 0, 0.9, 0.62);
     add(0.12, 0.12, 0.5, chrome, 0.2, 0.42, 0.45);
     if (sport) { add(0.5, 0.48, 0.55, bm, 0, 0.98, -0.6); add(0.4, 0.22, 0.05, glassMat, 0, 1.3, -0.82, -0.5); add(0.36, 0.16, 0.25, bm, 0, 1.0, 0.55); }
+  } else if (type === 'ambulancia') {
+    add(2.1, 2.0, 5.3, ambSkin, 0, 1.35, 0.1); add(1.9, 0.6, 0.06, glassMat, 0, 1.75, -2.56, -0.15);
+    const red = add(0.7, 0.18, 0.36, basic(0xff3030), -0.42, 2.45, -2.2), wht = add(0.7, 0.18, 0.36, basic(0xffffff), 0.42, 2.45, -2.2);
+    g.userData.bar = [red, wht];
+    wheels(0.4, 1.0, -1.75, 1.75); lights(0.75, -2.56, 2.76, 0.72);
   } else if (type === 'colectivo') {
     add(2.5, 2.5, 8.6, busSkin(bm.color.getHex()), 0, 1.65, 0); add(2.3, 0.14, 3, mat(0xc9ccd2), 0, 2.97, 0.6);
     wheels(0.5, 1.2, -2.8, 2.8); lights(0.85, -4.31, 4.31, 0.9);
@@ -2255,7 +2270,7 @@ function spawnCar(parked) {
   if (z > COAST + 4) return;
   for (const o of cars) if (Math.hypot(o.x - x, o.z - z) < 8) return;
   if (zoneAt(x, z) === 'aeropuerto') return;
-  const c = makeCar(x, z, faceTo(dx, dz), parked ? 'parked' : 'drive');
+  const c = makeCar(x, z, faceTo(dx, dz), parked ? 'parked' : 'drive', parked && Math.random() < 0.18 ? 'taxi' : undefined);
   if (!parked) { seat(c, randomRig(Math.random() < 0.15)); c.speed = c.cruise; }
 }
 /* Each AI car picks straight / right / left for the next corner and follows a fixed-radius arc
@@ -2293,6 +2308,7 @@ function enterCar(c) {
   player.gas = false; bF.classList.remove('on');
   pLab.textContent = 'FRENO'; bP.classList.remove('armed'); pBar.hidden = true; kLab.textContent = 'BAJAR';
   carHintT = 4; pop('¡' + c.spec.name.toUpperCase() + '!', c.x, 2.6, c.z, 'item');
+  if ((c.type === 'taxi' || c.type === 'ambulancia') && !job) setTimeout(() => offerJob(c), 900);
   setCtx(null); updateShootBtn(); sfx('door');
 }
 function exitCar() {
@@ -2477,6 +2493,7 @@ function wallCollide(c) {
   const dx = c.x - bx, dz = c.z - bz, d = Math.hypot(dx, dz);
   if (d < 1e-4) return;
   const nx = dx / d, nz = dz / d, hit = bounceOff(c, nx, nz, c.x - nx * c.hw, c.z - nz * c.hw, 0.25);
+  if (hit > 4 && c.state === 'player') jobBump(hit + 1);
   if (hit > 4) {
     sfx('crash'); burst(c.x - nx * c.hw, 0.8, c.z - nz * c.hw, 0xffd23c, 4, 2);
     if (c.state === 'player') shake = Math.max(shake, Math.min(0.4, hit * 0.03));
@@ -2503,6 +2520,7 @@ function collideCars(a, b) {
   applyDV(a, nx * j * ia, nz * j * ia, cx, cz);
   applyDV(b, -nx * j * ib, -nz * j * ib, cx, cz);
   const mine = a.state === 'player' || b.state === 'player', hard = -rel;
+  if (mine) jobBump(hard);
   if (mine && hard > 4 && ((a.police && a.state !== 'player') || (b.police && b.state !== 'player'))) addHeat(1);
   if (hard > 3) {
     sfx('crash'); burst(cx, 0.9, cz, 0xffd23c, Math.min(10, 2 + hard | 0), 2.5);
@@ -2779,6 +2797,11 @@ function drawMap() {
   }
   for (const k in GANGS) { const G = GANGS[k]; mg.fillStyle = G.css + '55'; mg.beginPath(); mg.arc((G.x - player.x) * sc + cx, (G.z - player.z) * sc + cy, 30 * sc, 0, PI * 2); mg.fill(); }
   for (const p of peds) dot(p.x, p.z, 4, p.state === 'ko' ? '#777' : p.gang ? GANGS[p.gang].css : p.cop ? '#9fb4ff' : p.angry ? '#ef5a3c' : '#2bb3a3');
+  if (job && (job.spot || job.dest)) {   // where the current fare or patient is (clamped to the edge of the minimap)
+    const t = job.stage === 'pickup' ? job.spot : job.dest; let x = (t.sx - player.x) * sc + cx, y = (t.sz - player.z) * sc + cy;
+    x = clamp(x, 10, S - 10); y = clamp(y, 10, S - 10);
+    mg.fillStyle = job.kind === 'taxi' ? '#ffc93c' : '#ff3b3b'; mg.strokeStyle = '#1d1b2e'; mg.lineWidth = 3; mg.beginPath(); mg.arc(x, y, 9 + Math.sin(elapsed * 6) * 2, 0, PI * 2); mg.fill(); mg.stroke();
+  }
   if (race) {
     mg.strokeStyle = '#ffd23c'; mg.lineWidth = 5; mg.beginPath();
     mg.moveTo((player.x - player.x) * sc + cx, cy);
@@ -3075,7 +3098,7 @@ function buildRoute(sx, sz, h) {
   return nodes;
 }
 function maybeChallenge(dt) {
-  if (!settings.races || !player.car || race || challenge || state !== 'play') return;
+  if (!settings.races || !player.car || race || challenge || job || state !== 'play') return;
   chalT -= dt;
   if (chalT > 0) return;
   const pc = player.car, type = pick(['deportivo', 'deportivo', 'descapotable', 'superauto', 'comun', 'jeep', 'motoDep']);
@@ -3675,6 +3698,8 @@ const BIZ = {
 };
 /* Three banks, always in the same place: a small one in the centre near where you start, a medium one on the tourist promenade and the big one in the financial district. */
 const BANKS = { '-1,-1': 'bancoC', '5,2': 'bancoM', '6,-5': 'bancoG' };
+/* Extra hospitals on the west side, so an ambulance always has one reasonably close. */
+const HOSPITALS = { '-5,-3': 'hospital', '-2,-5': 'hospital' };
 const BIZ_POOL = { centro: ['kiosco', 'almacen', 'farmacia', 'joyeria', 'kiosco', 'farmacia'], torres: ['cambio', 'joyeria', 'farmacia', 'kiosco', 'cambio'], paseo: ['joyeria', 'kiosco', 'farmacia', 'cambio', 'kiosco'], barrio: ['kiosco', 'almacen', 'farmacia', 'almacen'] };
 /* Which shopfront (if any) a block has: same answer every time, so the full map can show them too. */
 function bizOf(i, j) {
@@ -4348,6 +4373,185 @@ function roomCamera() {
   camera.lookAt(R.px + cfx * (3.5 + close * 2.5), 0.9, R.pz + cfz * (3.5 + close * 2.5));
 }
 
+/* ---------- jobs: taxi driver and ambulance ----------
+   Like the street races: get into a taxi or an ambulance and you are offered a shift. Each call puts a
+   beam of light on the map: drive there, stop by the kerb to pick the person up, then take them to their
+   destination (an ambulance always goes to the nearest hospital) before the clock runs out. */
+const JOB_INFO = {
+  taxi: { title: '¡Trabajo de taxista!', text: 'Te llegan llamadas por radio: buscá al pasajero, llevalo a donde te pida y cobrá el viaje. Si llegás rápido y sin chocar, te deja propina.' },
+  ambulancia: { title: '¡Turno de ambulancia!', text: 'Hay heridos en la calle. Buscalos y llevalos al hospital más cercano antes de que se acabe el tiempo. Cada traslado se paga bien.' }
+};
+const PLACE_NAMES = { iglesia: 'LA IGLESIA', hospital: 'EL HOSPITAL', escuela: 'LA ESCUELA', super: 'EL SUPERMERCADO', nafta: 'LA ESTACIÓN DE SERVICIO', bancoC: 'EL BANCO DE BARRIO', bancoM: 'EL BANCO DEL SUR', bancoG: 'EL BANCO DEL PLATA' };
+const JOB_SIDES = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+let job = null, jobOffer = null;
+const jobDlg = document.getElementById('jobDlg');
+function placeLabel(i, j) { const sp = specialOf(i, j); return PLACE_NAMES[sp] || (zoneOf(i, j) === 'plaza' ? 'LA PLAZA' : ZONE_NAMES[districtOf(i, j)]); }
+/* a spot on a sidewalk next to a drivable street, between dmin and dmax metres from (cx, cz) */
+function jobSpot(cx, cz, dmin, dmax) {
+  for (let k = 0; k < 60; k++) {
+    const a = rand(0, PI * 2), d = rand(dmin, dmax), i = Math.floor((cx + Math.cos(a) * d) / P), j = Math.floor((cz + Math.sin(a) * d) / P);
+    const zn = districtOf(i, j); if (zn === 'playa' || zn === 'aeropuerto' || zn === 'puerto' || j < -11) continue;
+    const s = (Math.random() * 4) | 0; if (hwySide(i, j, s)) continue;
+    const [nx, nz] = JOB_SIDES[s], [ex, ez] = bizEdge(i, j, s, rand(8, 20));
+    const spot = { i, j, nx, nz, x: ex + nx * 2.4, z: ez + nz * 2.4, sx: ex + nx * (HALF - CURB), sz: ez + nz * (HALF - CURB) };
+    if (spot.sz > COAST - 2 || onHwy(spot.sx, spot.sz) || inCross(spot.sx, spot.sz)) continue;
+    const dd = Math.hypot(spot.sx - cx, spot.sz - cz); if (dd < dmin * 0.7 || dd > dmax * 1.3) continue;
+    spot.name = placeLabel(i, j); return spot;
+  }
+  return null;
+}
+function nearestHospital(x, z) {   // the ambulance always heads for the closest hospital
+  const ci = Math.floor(x / P), cj = Math.floor(z / P); let best = null, bd = 1e9;
+  for (let i = ci - 12; i <= ci + 12; i++) for (let j = cj - 12; j <= cj + 12; j++) {
+    if (specialOf(i, j) !== 'hospital') continue;
+    const sx = i * P + HALF + 14, sz = (j + 1) * P - CURB, d = Math.hypot(sx - x, sz - z);
+    if (d < bd) { bd = d; best = { i, j, nx: 0, nz: 1, x: sx, z: (j + 1) * P - HALF + 2.4, sx, sz, name: 'EL HOSPITAL' }; }
+  }
+  return best;
+}
+function offerJob(c) {
+  if (!player.car || player.car !== c || race || challenge || job || state !== 'play') return;
+  const J = JOB_INFO[c.type];
+  document.getElementById('jobTitle').textContent = J.title; document.getElementById('jobText').textContent = J.text;
+  jobOffer = c; input.l = input.r = input.brake = false; player.gas = false; bF.classList.remove('on');
+  state = 'dialog'; jobDlg.hidden = false; sfx(c.type === 'taxi' ? 'honk' : 'siren');
+}
+function answerJob(yes) {
+  jobDlg.hidden = true; if (state === 'dialog') state = 'play';
+  const c = jobOffer; jobOffer = null;
+  if (!yes || !c || player.car !== c) return;
+  job = { kind: c.type, car: c, stage: 'call', t: 1.2, earned: 0, trips: 0, spot: null, dest: null, pax: null, helper: null, bumps: 0, talkT: 0, sirenT: 0 };
+  showZone(c.type === 'taxi' ? 'TURNO DE TAXI' : 'TURNO DE AMBULANCIA');
+}
+function clearJobPeople() {
+  for (const p of [job && job.pax, job && job.helper]) { const k = peds.indexOf(p); if (p && k >= 0 && p.state !== 'ko') { p.post = null; p.wave = false; } }
+}
+function endJob(why) {
+  if (!job) return;
+  const j = job; clearJobPeople();
+  if (j.car && j.car.g.userData.bar) for (const b of j.car.g.userData.bar) b.visible = true;
+  job = null; beam.visible = false; if (!race) raceNav.hidden = true;
+  showZone((why ? why + ' · ' : '') + 'GANASTE $' + j.earned);
+}
+function resetJob() { job = null; jobOffer = null; jobDlg.hidden = true; }
+function spawnPax() {   // the passenger waving on the kerb, or the injured person lying there with someone calling for help
+  const s = job.spot;
+  if (job.kind === 'taxi') {
+    const p = makePed(randomRig(false), s.x, s.z, s.nz || 0.0001, -s.nx);
+    p.post = { x: s.x, z: s.z, face: faceTo(s.nx, s.nz) }; p.rig.g.rotation.y = p.post.face; p.wave = true; p.tried = true; p.mood = 'calm';
+    job.pax = p;
+  } else {
+    const p = makePed(randomRig(false), s.x, s.z, 0.0001, 1); p.state = 'ko'; p.koT = 1; p.kbx = p.kbz = 0; p.cash = 0; p.tried = true;
+    p.rig.g.rotation.y = faceTo(s.nz || 1, -s.nx); job.pax = p;
+    const hx = s.x - s.nz * 1.3, hz = s.z + s.nx * 1.3, h = makePed(randomRig(false), hx, hz, 0.0001, 1);
+    h.post = { x: hx, z: hz, face: faceTo(s.nx, s.nz) }; h.rig.g.rotation.y = h.post.face; h.wave = true; h.tried = true; h.mood = 'calm'; job.helper = h;
+  }
+}
+function updateJob(dt) {
+  parkAmbulances();
+  if (!job || state !== 'play') return;
+  const c = job.car;
+  if (player.car !== c || cars.indexOf(c) < 0) { endJob(job.stage === 'ride' ? (job.kind === 'taxi' ? 'EL PASAJERO SE BAJÓ' : 'DEJASTE LA AMBULANCIA') : 'FIN DEL TURNO'); return; }
+  if (c.g.userData.bar) { const on = Math.floor(elapsed * 6) % 2; c.g.userData.bar[0].visible = !!on; c.g.userData.bar[1].visible = !on; }
+  if (job.kind === 'ambulancia' && job.stage !== 'call') { job.sirenT -= dt; if (job.sirenT <= 0) { sfx('siren'); job.sirenT = 1.6; } }
+  if (job.stage === 'call') {
+    job.t -= dt;
+    if (job.t <= 0) {
+      const s = jobSpot(c.x, c.z, 70, 190);
+      if (!s) { job.t = 1; return; }
+      const d = Math.hypot(s.sx - c.x, s.sz - c.z);
+      job.spot = s; job.stage = 'pickup'; job.pax = job.helper = null; job.bumps = 0;
+      job.limit = job.time = job.kind === 'ambulancia' ? d / 8 + 25 : 0;
+      sfx('ding'); showZone(job.kind === 'taxi' ? '¡NUEVA LLAMADA!' : '¡EMERGENCIA!');
+    }
+    return;
+  }
+  const tgt = job.stage === 'pickup' ? job.spot : job.dest, d = Math.hypot(tgt.sx - c.x, tgt.sz - c.z), slow = Math.abs(c.speed) < 3;
+  if (job.time > 0) {
+    job.time -= dt;
+    if (job.time <= 0) {
+      if (job.stage === 'pickup') { endCall(job.kind === 'ambulancia' ? 'LLEGASTE TARDE: SE LO LLEVÓ OTRA AMBULANCIA' : 'EL PASAJERO SE CANSÓ DE ESPERAR'); return; }
+      endCall(job.kind === 'taxi' ? 'EL PASAJERO SE BAJÓ ENOJADO' : 'LLEGASTE TARDE: LO ATENDIÓ OTRO MÓVIL', true); return;
+    }
+  }
+  if (job.stage === 'pickup') {
+    const near = Math.hypot(job.spot.x - player.x, job.spot.z - player.z) < 65;
+    if (near && (!job.pax || peds.indexOf(job.pax) < 0)) spawnPax();
+    if (job.pax && job.kind === 'taxi' && job.pax.state === 'ko') { endCall('¡LE PEGASTE AL PASAJERO!'); return; }
+    if (job.helper && peds.indexOf(job.helper) >= 0 && d < 30) { job.talkT -= dt; if (job.talkT <= 0) { pop(pick(['¡ACÁ, ACÁ!', '¡AYUDA, RÁPIDO!', '¡NO RESPIRA BIEN!']), job.helper.x, 2.7, job.helper.z, 'talk'); job.talkT = 2.5; } }
+    if (d < 8 && slow && job.pax && peds.indexOf(job.pax) >= 0) {
+      const k = peds.indexOf(job.pax); removePed(k); job.pax = null; sfx('door');
+      if (job.helper) { pop('¡GRACIAS!', job.helper.x, 2.7, job.helper.z, 'talk'); job.helper.post = null; job.helper.wave = false; }
+      const dest = job.kind === 'taxi' ? jobSpot(c.x, c.z, 140, 330) : nearestHospital(c.x, c.z);
+      if (!dest) { endJob('NO HAY HOSPITALES CERCA'); return; }
+      const dd = Math.hypot(dest.sx - c.x, dest.sz - c.z);
+      job.dest = dest; job.stage = 'ride'; job.dist = dd; job.bumps = 0;
+      job.limit = job.time = job.kind === 'taxi' ? dd / 8.5 + 22 : dd / 9 + 18;
+      job.fare = Math.round(job.kind === 'taxi' ? 25 + dd * 0.22 : 70 + dd * 0.35);
+      pop(job.kind === 'taxi' ? pick(['¡HOLA! LLEVAME A ' + dest.name, '¡A ' + dest.name + ', POR FAVOR!']) : '¡PACIENTE A BORDO!', c.x, 2.8, c.z, 'talk');
+    }
+  } else if (d < 8 && slow) {   // arrived
+    const tip = job.kind === 'taxi' && job.time > job.limit * 0.35 && job.bumps === 0 ? Math.round(job.fare * 0.3) : 0, pay = job.fare + tip;
+    addMoney(pay); job.earned += pay; job.trips++; sfx('cash'); sfx('door');
+    pop('+$' + pay + (tip ? ' (PROPINA $' + tip + ')' : ''), c.x, 2.6, c.z, 'cash');
+    const s = job.dest, out = makePed(randomRig(false), s.x, s.z, -s.nz || 0.0001, s.nx); out.tried = true;
+    pop(job.kind === 'taxi' ? pick(['¡GRACIAS, MAESTRO!', '¡JOYA, GRACIAS!', '¡QUÉ VIAJE!']) : '¡LLEGÓ A TIEMPO!', s.x, 2.7, s.z, 'talk');
+    job.stage = 'call'; job.t = 3; job.dest = job.spot = null;
+  }
+}
+function endCall(why, riding) {   // this call is lost, the shift goes on
+  if (riding && job.kind === 'taxi') { const out = makePed(randomRig(false), player.x + 2, player.z, 1, 0); out.tried = true; }
+  clearJobPeople(); showZone(why); sfx('hurt');
+  job.stage = 'call'; job.t = 4; job.spot = job.dest = null; job.pax = job.helper = null;
+}
+function jobBump(hard) {   // crashes while carrying someone cost you the tip
+  if (!job || job.stage !== 'ride' || hard < 5) return;
+  job.bumps++;
+  if (job.kind === 'taxi') pop(pick(['¡CUIDADO!', '¡ME QUERÉS MATAR!', '¡MÁS DESPACIO!']), player.x, 2.8, player.z, 'talk');
+}
+function drawJob() {   // the beam over the target and the arrow panel
+  if (!job || job.stage === 'call' || race) { if (job && !race) { raceNav.hidden = false; document.getElementById('navText').textContent = job.kind === 'taxi' ? 'ESPERANDO LLAMADA…' : 'ESPERANDO EMERGENCIA…'; document.getElementById('navSub').textContent = 'Viajes: ' + job.trips + ' · Ganado: $' + job.earned; document.getElementById('navArrow').style.transform = 'rotate(0deg)'; beam.visible = false; } return; }
+  const c = job.car, t = job.stage === 'pickup' ? job.spot : job.dest, ex = t.sx - c.x, ez = t.sz - c.z, d = Math.hypot(ex, ez);
+  beam.visible = true; beam.position.set(t.sx, hgt(t.sx, t.sz) + 20, t.sz);
+  const rel = angDiff(c.th, faceTo(ex / (d || 1), ez / (d || 1)));
+  document.getElementById('navArrow').style.transform = 'rotate(' + (-rel * 180 / PI).toFixed(0) + 'deg)';
+  const label = job.stage === 'pickup' ? (job.kind === 'taxi' ? 'BUSCÁ AL PASAJERO' : 'HERIDO EN ' + t.name) : (job.kind === 'taxi' ? 'DESTINO: ' + t.name : 'LLEVALO A ' + t.name);
+  const hint = d < 14 && Math.abs(c.speed) >= 3 ? ' · ¡FRENÁ!' : '';
+  document.getElementById('navText').textContent = label;
+  document.getElementById('navSub').textContent = Math.round(d) + ' m' + (job.stage === 'ride' ? ' · $' + job.fare : '') + (job.time > 0 ? ' · ' + Math.ceil(job.time) + ' s' : '') + hint;
+  raceNav.hidden = false;
+}
+/* ambulances wait under the canopy of every hospital you pass */
+function parkAmbulances() {
+  const pi = Math.floor(player.x / P), pj = Math.floor(player.z / P);
+  for (let i = pi - 1; i <= pi + 1; i++) for (let j = pj - 1; j <= pj + 1; j++) {
+    if (specialOf(i, j) !== 'hospital') continue;
+    const key = i + ',' + j; if (cars.some(c => c.hosp === key)) continue;
+    const x = i * P + HALF + 14, z = j * P + HALF + 23.5;
+    if (Math.hypot(x - player.x, z - player.z) < 20 || cars.some(c => Math.hypot(c.x - x, c.z - z) < 5)) continue;
+    const c = makeCar(x, z, faceTo(0, 1), 'parked', 'ambulancia'); c.hosp = key;
+  }
+}
+const ambSideCv = (() => {   // white van with a red band, a red cross and the word on the side
+  const [c, g] = cv(256, 96); g.fillStyle = '#f4f1ea'; g.fillRect(0, 0, 256, 96);
+  g.fillStyle = '#d62828'; g.fillRect(0, 52, 256, 14); g.fillStyle = '#ffffff'; g.fillRect(0, 50, 256, 2); g.fillRect(0, 66, 256, 2);
+  g.fillStyle = '#d62828'; g.fillRect(168, 12, 10, 30); g.fillRect(158, 22, 30, 10);
+  g.fillStyle = '#1d1b2e'; g.font = '900 15px "Arial Black", Impact, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('AMBULANCIA', 80, 30);
+  g.fillStyle = '#26324c'; g.fillRect(212, 10, 36, 30);
+  g.fillStyle = 'rgba(20,18,26,.85)'; g.fillRect(0, 86, 256, 10); for (const u of [0.18, 0.82]) { g.beginPath(); g.ellipse(256 * u, 96, 22, 22, 0, PI, PI * 2); g.fill(); }
+  return c;
+})();
+const ambSkin = (() => {
+  const side = lam(ambSideCv), [fc, fg] = cv(128, 96); fg.fillStyle = '#f4f1ea'; fg.fillRect(0, 0, 128, 96);
+  fg.fillStyle = '#d62828'; fg.fillRect(0, 52, 128, 14); fg.fillStyle = '#d62828'; fg.font = '900 16px "Arial Black", Impact, sans-serif'; fg.textAlign = 'center'; fg.textBaseline = 'middle';
+  fg.save(); fg.translate(64, 28); fg.scale(-1, 1); fg.fillText('AMBULANCIA', 0, 0); fg.restore();
+  const front = lam(fc), back = lam((() => { const [c, g] = cv(128, 96); g.fillStyle = '#f4f1ea'; g.fillRect(0, 0, 128, 96); g.fillStyle = '#d62828'; g.fillRect(58, 14, 12, 40); g.fillRect(44, 28, 40, 12); g.fillStyle = 'rgba(0,0,0,.4)'; g.fillRect(63, 4, 2, 88); return c; })());
+  return [side, side, whiteMat, mat(0x2b2838), back, front];
+})();
+
+document.getElementById('jobYes').addEventListener('click', () => answerJob(true));
+document.getElementById('jobNo').addEventListener('click', () => answerJob(false));
+
 /* ---------- pause & options ---------- */
 const SETTINGS_UI = [
   ['police', 'Policía', 'Te persiguen si cometés delitos'],
@@ -4427,7 +4631,7 @@ function startGame() {
   player.hp = player.maxHp; player.invuln = 0; player.attack = null; player.down = 0; player.kickBonus = 0;
   player.money = 0; player.earned = 0; addMoney(0);
   player.rig.body.rotation.set(0, 0, 0); player.rig.body.position.y = 0;
-  equip(null); dropGun(); resetRace(); resetWorldThreats(); drawHearts();
+  equip(null); dropGun(); resetJob(); resetRace(); resetWorldThreats(); drawHearts();
   menuEl.hidden = true; overEl.hidden = true; shopOv.hidden = true; state = 'play';
   player.walking = false; input.back = false; bF.classList.remove('on');
   const s = streetSpot(5, lateralOf(player.x, player.z, DIRS[player.h][0]) - 1.2); dropPickup('palo', s.x, s.z);
@@ -4618,7 +4822,7 @@ function updatePeds(dt) {
         r.body.rotation.x = 0;
         if (hd > 1) { p.x += hx / hd * 1.6 * dt; p.z += hz / hd * 1.6 * dt; p.phase += dt * 6; walkPose(r, p.phase, 0.5); r.g.rotation.y = faceTo(hx / hd, hz / hd); }
         else { walkPose(r, 0, 0); p.idleT = (p.idleT || 0) + dt; r.body.rotation.y = Math.sin(p.idleT * 0.7 + p.phase) * 0.4; r.g.rotation.y = p.post.face; }
-        r.armR.rotation.x = p.chat ? 0.5 + Math.sin((p.idleT || 0) * 3 + p.phase) * 0.45 : 0.3;
+        r.armR.rotation.x = p.wave ? -2.7 + Math.sin((p.idleT || 0) * 7) * 0.35 : p.chat ? 0.5 + Math.sin((p.idleT || 0) * 3 + p.phase) * 0.45 : 0.3;
       } else if (p.state === 'toCar') {
         const c = p.car;
         if (!c || c.driver || c.state !== 'parked' || cars.indexOf(c) < 0) p.state = 'walk';
@@ -4728,6 +4932,7 @@ function frame(now) {
     updatePlayer(dt); updatePeds(dt); updateCars(dt); updateProps(dt); updateDebris(dt); updateBullets(dt); updateAir(dt);
     if (state === 'play') { updateGangs(dt); updatePolice(dt); updateHeli(dt); }
     maybeChallenge(dt); updateChallenge(dt); updateRace(dt);
+    if (state === 'play') { updateJob(dt); drawJob(); }
   }
   updateWorld(dt);
   drawMap();
