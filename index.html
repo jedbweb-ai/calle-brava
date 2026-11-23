@@ -421,7 +421,7 @@ function clampWalk(o, lim = WALK, half = 0.4) {
    forecourt, lawn or car park, and only the building itself (plus columns, posts and trees) is solid. */
 function lotObs(bi, bj) {
   const k = specialOf(bi, bj), x0 = bi * P + HALF, z0 = bj * P + HALF;
-  if (!k) return null;
+  if (!k) { const zn = zoneOf(bi, bj); return zn === 'puerto' || zn === 'industrial' ? yardObs.get(bi + ',' + bj) || null : null; }
   const r = (ax, bx, az, bz) => [x0 + ax, x0 + bx, z0 + az, z0 + bz], post = (x, z, h = 0.35) => r(x - h, x + h, z - h, z + h);
   if (k === 'nafta') return [r(8, 20, 1.5, 7.7), r(6.7, 8.3, 16.2, 20.8), r(19.7, 21.3, 16.2, 20.8)];
   if (k === 'super') return [r(1, 27, 1, 13.3)];
@@ -1570,8 +1570,11 @@ function gantry(g, x, z, ew, k) {   // overhead sign bridge across a motorway
   const beam = box(19.9, 0.45, 0.35, gantryMat); beam.position.set(0, 6.6, 0); gg.add(beam);
   g.add(gg);
 }
-function containerStack(g, x, z, n, rng, alongZ) {
+/* Port yards and factories are open ground too; their sheds, containers, tanks and fences are recorded here as they are built. */
+const yardObs = new Map(), yardKey = (x0, z0) => Math.round((x0 - HALF) / P) + ',' + Math.round((z0 - HALF) / P);
+function containerStack(g, x, z, n, rng, alongZ, obs) {
   for (let k = 0; k < n; k++) { const c = box(alongZ ? 2.5 : 6, 2.6, alongZ ? 6 : 2.5, contMats[(rng() * contMats.length) | 0]); c.position.set(x, 1.35 + k * 2.6, z); g.add(c); }
+  if (obs && n > 0) { const hx = alongZ ? 1.25 : 3, hz = alongZ ? 3 : 1.25; obs.push([x - hx, x + hx, z - hz, z + hz]); }
 }
 function shed(g, x, y0, z, w, h, d, col) {   // metal warehouse with a barrel roof
   const b = tbox(w, h, d, lam(metalCv, col, 1), 3); b.position.set(x, y0 + h / 2, z); g.add(b);
@@ -1580,18 +1583,21 @@ function shed(g, x, y0, z, w, h, d, col) {   // metal warehouse with a barrel ro
 }
 function buildPortYard(g, x0, z0, rng) {
   const fl = tbox(28, 0.1, 28, quayMat, 6); fl.position.set(x0 + 14, 0.05, z0 + 14); g.add(fl);
-  const half = rng() < 0.45;
-  if (half) shed(g, x0 + 14, 0, z0 + 7.5, 26, 7, 13, 0xb9c2cc);
-  for (let a = 0; a < 3; a++) for (let b = half ? 3 : 0; b < 6; b++) { const n = (rng() * 4) | 0; if (n) containerStack(g, x0 + 4 + a * 10, z0 + 2.6 + b * 4.56, n, rng, false); }
+  const half = rng() < 0.45, obs = [];
+  if (half) { shed(g, x0 + 14, 0, z0 + 7.5, 26, 7, 13, 0xb9c2cc); obs.push([x0 + 1, x0 + 27, z0 + 1, z0 + 14]); }
+  for (let a = 0; a < 3; a++) for (let b = half ? 3 : 0; b < 6; b++) { const n = (rng() * 4) | 0; if (n) containerStack(g, x0 + 4 + a * 10, z0 + 2.6 + b * 4.56, n, rng, false, obs); }
+  yardObs.set(yardKey(x0, z0), obs);
 }
 function buildIndustrial(g, x0, z0, rng) {
   const fl = tbox(28, 0.08, 28, alleyMat, 5); fl.position.set(x0 + 14, 0.04, z0 + 14); g.add(fl);
+  const obs = [[x0 + 1, x0 + 27, z0 + 1, z0 + 15]];
   shed(g, x0 + 14, 0, z0 + 8, 26, 8 + ((rng() * 3) | 0), 14, pick([0xc6cad2, 0xb5a58f, 0x9fb3a8, 0xc2a48f]));
   const sn = box(12, 1.6, 0.3, labelMat(['FÁBRICA', 'DEPÓSITO', 'FRIGORÍFICO', 'METALÚRGICA', 'ASERRADERO', 'LOGÍSTICA'][(rng() * 6) | 0], '#2a2633', '#ffc93c')); sn.position.set(x0 + 14, 6.4, z0 + 15.2); g.add(sn);
-  if (rng() < 0.6) { const ch = new THREE.Mesh(chimneyGeo, bandsMat); ch.position.set(x0 + 24, 11, z0 + 23); g.add(ch); }
-  if (rng() < 0.6) for (const tx of [5, 12]) { const t = new THREE.Mesh(tankGeo, lam(metalCv, 0xd8dce2, 6, 1)); t.position.set(x0 + tx, 3, z0 + 22.5); g.add(t); }
-  else for (let a = 0; a < 2; a++) containerStack(g, x0 + 5 + a * 8, z0 + 22, 1 + ((rng() * 2) | 0), rng, false);
-  for (const [w, d, x, z] of [[27.6, 0.15, 14, 0.2], [0.15, 27.6, 0.2, 14], [0.15, 27.6, 27.8, 14]]) { const fe = tbox(w, 1.6, d, lam(metalCv, 0x7a7f88, 1), 1); fe.position.set(x0 + x, 0.8, z0 + z); g.add(fe); }
+  if (rng() < 0.6) { const ch = new THREE.Mesh(chimneyGeo, bandsMat); ch.position.set(x0 + 24, 11, z0 + 23); g.add(ch); obs.push([x0 + 22.8, x0 + 25.2, z0 + 21.8, z0 + 24.2]); }
+  if (rng() < 0.6) for (const tx of [5, 12]) { const t = new THREE.Mesh(tankGeo, lam(metalCv, 0xd8dce2, 6, 1)); t.position.set(x0 + tx, 3, z0 + 22.5); g.add(t); obs.push([x0 + tx - 3, x0 + tx + 3, z0 + 19.5, z0 + 25.5]); }
+  else for (let a = 0; a < 2; a++) containerStack(g, x0 + 5 + a * 8, z0 + 22, 1 + ((rng() * 2) | 0), rng, false, obs);
+  for (const [w, d, x, z] of [[27.6, 0.15, 14, 0.2], [0.15, 27.6, 0.2, 14], [0.15, 27.6, 27.8, 14]]) { const fe = tbox(w, 1.6, d, lam(metalCv, 0x7a7f88, 1), 1); fe.position.set(x0 + x, 0.8, z0 + z); g.add(fe); obs.push([x0 + x - w / 2, x0 + x + w / 2, z0 + z - d / 2 - 0.05, z0 + z + d / 2 + 0.05]); }
+  yardObs.set(yardKey(x0, z0), obs);
 }
 function buildSpecial(g, x0, z0, kind, rng) {   // every one faces south (+z)
   const put = (m, x, y, z) => { m.position.set(x0 + x, y, z0 + z); g.add(m); return m; };

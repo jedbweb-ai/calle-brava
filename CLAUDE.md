@@ -43,7 +43,8 @@ pausa/opciones → estado de juego → `frame()`.
   Interior = escena Three aparte (`room.scene`, `state === 'inside'`); el mundo de afuera se congela.
   Pegar o APUNTAR arranca el asalto; cajeros pagan mientras estés cerca; clientes se tiran, huyen (pueden llamar a la policía) o pelean; guardias disparan.
   Alarma según `BIZ[kind].alarm` → llegan policías adentro; al salir: búsqueda, o sospecha + patrullero despachado al local. Local robado cerrado 150 s.
-- **Edificios especiales** (iglesia, hospital, escuela, bancos, nafta, súper): el predio es caminable, solo el edificio bloquea (`lotObs`).
+- **Predios caminables** (iglesia, hospital, escuela, bancos, nafta, súper, zona industrial y patios del puerto): solo bloquea lo que tiene volumen (`lotObs`).
+  Industrial y puerto se arman al azar, así que sus obstáculos (galpones, contenedores, tanques, chimeneas, cercas) se guardan en `yardObs` al construir la cuadra.
 - **Policía:** solo persigue si un policía te ve (o sospecha que se borra sola). Patrulleros: 10,5 + 1,2 × nivel, aceleración 8.
   **Helicóptero** (nivel 3) desactivable en Opciones (`settings.heli`).
 - Opciones guardadas en `localStorage['calle-brava-settings']`; récord en `localStorage['calle-brava-best']`.
