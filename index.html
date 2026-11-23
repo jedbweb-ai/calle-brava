@@ -496,7 +496,7 @@ function buildAlley(g, x0, z0, alley) {
    - manzanas: v = manzana con vereda (sin la calzada), l = lote edificable, z = zona, b = barrio
    - costa, lagos, playas: polígonos; alturas: grilla 128x128; suelo: grilla 256x256 (mar, agua, arena, pasto, cemento) */
 const MAPA = JSON.parse(document.getElementById('mapa-datos').textContent);
-const ETAPA_MAPA = 4;   // hasta dónde llegó la migración: lo que todavía depende de la cuadrícula vieja queda apagado
+const ETAPA_MAPA = 5;   // hasta dónde llegó la migración: lo que todavía depende de la cuadrícula vieja queda apagado
 const ASF = [4.5, 6.5, 11, 3.8, 0, 0, 0, 3.4], MEDIO = [9, 11, 16, 6, 0, 0, 0, 6.5];   // medio ancho de calzada y de calle con veredas, por clase (7 = pasaje del Microcentro)
 const ISLA = { x0: -2090 * MAPA.escala, z0: -2700 * MAPA.escala, size: 4000 * MAPA.escala };
 const pares = f => { const o = []; for (let k = 0; k < f.length; k += 2) o.push([f[k], f[k + 1]]); return o; };
@@ -663,10 +663,10 @@ function proyectar(e, x, z) {   // cuánto avanzó (desde a) la proyección de (
 function elegirSalida(n, e, tx, tz, ok = () => true, sesgo = null) {
   const N = NODOS[n], cand = [];
   for (const e2 of N.aristas) {
-    if (e2 === e || !ok(e2)) continue;
+    if ((e2 === e && !sesgo) || !ok(e2)) continue;   // con un destino (patrulleros) también vale pegar la vuelta
     const dir = e2.a === n ? 1 : -1, p = ptArista(e2, dir, Math.min(6, e2.len / 2)), ox = p.x - N.x, oz = p.z - N.z, L = Math.hypot(ox, oz) || 1;
     const cos = (ox * tx + oz * tz) / L, cruz = tx * oz - tz * ox;   // cruz > 0: dobla a la derecha
-    if (cos < -0.6) continue;   // casi una vuelta en U
+    if (cos < -0.6 && !sesgo) continue;   // casi una vuelta en U
     cand.push({ e: e2, dir, cos, cruz });
   }
   if (!cand.length) return ok(e) ? { e, dir: e.a === n ? 1 : -1 } : null;   // calle sin salida: vuelve
@@ -685,7 +685,7 @@ function adelante(R, d, ok) {
   let e = R.e, dir = R.dir, s = R.s + d, nx = R.next, guard = 0;
   while (s > e.len && guard++ < 4) {
     const n = dir > 0 ? e.b : e.a, t = ptArista(e, dir, e.len);
-    if (!nx) { nx = elegirSalida(n, e, t.tx, t.tz, ok); if (e === R.e) R.next = nx; }
+    if (!nx) { const k = guard - 1; nx = R.plan && R.plan.length > k ? R.plan[k] : elegirSalida(n, e, t.tx, t.tz, ok, R.sesgo ? q => R.sesgo(q, n) : null); if (e === R.e) R.next = nx; }
     if (!nx) return ptArista(e, dir, e.len);
     s -= e.len; e = nx.e; dir = nx.dir; nx = null;
   }
@@ -696,7 +696,7 @@ function avanzarRuta(R, x, z, ok) {   // actualiza s con la posición real y pas
   const nf = R.dir > 0 ? R.e.b : R.e.a;
   if (R.s >= R.e.len - Math.min(NODOS[nf].r, R.e.len * 0.3)) {   // ya entró en la esquina: pasa al tramo siguiente
     const n = nf, t = ptArista(R.e, R.dir, R.e.len);
-    const nx = R.next || elegirSalida(n, R.e, t.tx, t.tz, ok); if (!nx) return dd;
+    const nx = R.plan && R.plan.length ? R.plan.shift() : R.next || elegirSalida(n, R.e, t.tx, t.tz, ok, R.sesgo ? q => R.sesgo(q, n) : null); if (!nx) return dd;
     R.e = nx.e; R.dir = nx.dir; R.next = null; const [a2] = proyectar(R.e, x, z); R.s = R.dir > 0 ? a2 : R.e.len - a2;
   }
   return dd;
@@ -1553,9 +1553,15 @@ function tagMaterial(text, col) {
   return lam(c);
 }
 const GANGS = {
-  rojo: { name: 'LOS ROJOS', color: 0xd62828, css: '#e23b3b', x: -2 * P, z: 2 * P, aggro: 0, cd: 0, tagMat: tagMaterial('ROJOS', '#e23b3b') },
-  azul: { name: 'LOS AZULES', color: 0x1e5bd6, css: '#3b78ff', x: 2 * P, z: -3 * P, aggro: 0, cd: 0, tagMat: tagMaterial('AZULES', '#3b78ff') }
+  rojo: { name: 'LOS ROJOS', barrio: 'SAN CAYETANO', color: 0xd62828, css: '#e23b3b', x: 0, z: 0, aggro: 0, cd: 0, tagMat: tagMaterial('ROJOS', '#e23b3b') },
+  azul: { name: 'LOS AZULES', barrio: 'VILLA FLORIDA', color: 0x1e5bd6, css: '#3b78ff', x: 0, z: 0, aggro: 0, cd: 0, tagMat: tagMaterial('AZULES', '#3b78ff') }
 };
+/* cada banda para en una esquina de cuatro calles comunes de su barrio, cerca del centro del barrio */
+for (const k in GANGS) {
+  const G = GANGS[k], B = MAPA.barrios.find(b => b.n === G.barrio); let best = null, bd = 1e9;
+  for (const n of NODOS) { const d = Math.hypot(n.x - B.x, n.z - B.z); if (d < bd && n.aristas.length === 4 && n.aristas.every(e => e.c === 0 && e.len > 30)) { bd = d; best = n; } }
+  G.nodo = best; G.x = best.x; G.z = best.z;
+}
 const kioskMat = lam(plasterCv, 0xe07aa6);
 const stationMats = (() => {
   const [c, g] = cv(512, 266), navy = mat(0x24345c);
@@ -2836,7 +2842,7 @@ function spawnAutoAU() {   // tránsito arriba de la autopista por la que va el 
 /* La manejada de la computadora: apunta a un punto unos metros adelante sobre su carril (así dobla solo en
    las esquinas), baja la velocidad antes de doblar y cede el paso si alguien está cruzando la esquina.
    Devuelve { ritmo, max, espera, enCordon }. */
-function conducirIA(c, dt) {
+function conducirIA(c, dt, apurado = false) {
   const [fx, fz] = carF(c), out = { ritmo: 1, max: 99, espera: false, enCordon: false };
   let gx, gz, look = 5 + Math.max(0, c.speed) * 0.55;
   if (c.au) {   // en la autopista: sigue las muestras del tablero
@@ -2847,7 +2853,7 @@ function conducirIA(c, dt) {
     const a = S[j], b = S[j + dir], L = Math.hypot(b.x - a.x, b.z - a.z) || 1, tx = (b.x - a.x) / L, tz = (b.z - a.z) / L;
     gx = a.x - tz * (c.au.off + c.dodge); gz = a.z + tx * (c.au.off + c.dodge); out.ritmo = 1.6;
   } else {
-    if (!c.ruta || avanzarRuta(c.ruta, c.x, c.z, esCalleAuto) > 14) c.ruta = rutaDesde(c.x, c.z, fx, fz, esCalleAuto);
+    if (!c.ruta || avanzarRuta(c.ruta, c.x, c.z, esCalleAuto) > 14) { const sg = c.ruta && c.ruta.sesgo; c.ruta = rutaDesde(c.x, c.z, fx, fz, esCalleAuto); if (c.ruta && sg) c.ruta.sesgo = sg; }
     const R = c.ruta; if (!R) { out.max = 0; return out; }
     const q = adelante(R, look, esCalleAuto), off = (c.state === 'pull' ? ASF[R.e.c] - 1.15 : carrilDe(c, R.e)) + c.dodge;
     gx = q.x - q.tz * off; gz = q.z + q.tx * off;
@@ -2855,7 +2861,7 @@ function conducirIA(c, dt) {
     if (resta < 24 && n.aristas.length > 2) {   // llegando a una esquina
       const t = ptArista(R.e, R.dir, R.e.len), nx = R.next || (adelante(R, resta + 1, esCalleAuto), R.next);
       if (nx) { const p2 = ptArista(nx.e, nx.dir, 4), ox = p2.x - n.x, oz = p2.z - n.z, Lo = Math.hypot(ox, oz) || 1, cos = (ox * t.tx + oz * t.tz) / Lo; if (cos < 0.8) out.max = cos < 0.3 ? 4.5 : 6.5; }
-      if (resta < n.r + 9 && resta > n.r - 1) for (const o of cars) {   // ceder el paso a quien ya está cruzando
+      if (!apurado && resta < n.r + 9 && resta > n.r - 1) for (const o of cars) {   // ceder el paso a quien ya está cruzando
         if (o === c || (o.nivel || 0) !== (c.nivel || 0) || Math.hypot(o.x - n.x, o.z - n.z) > n.r + 1.5 || Math.abs(o.speed) < 0.5) continue;
         const [ofx, ofz] = carF(o); if (Math.abs(ofx * fx + ofz * fz) < 0.75) { out.espera = true; break; }
       }
@@ -3437,6 +3443,7 @@ function drawBigMap() {
   g.textAlign = 'center'; g.textBaseline = 'middle'; g.lineJoin = 'round';
   const rot = (t, x, z, size, ang) => { g.save(); g.translate(X(x), Y(z)); g.rotate(ang * PI / 180); g.font = '900 ' + size + 'px "Arial Black", Impact, sans-serif'; g.lineWidth = 3; g.strokeStyle = '#1d1b2e'; g.strokeText(t, 0, 0); g.fillStyle = '#fff4e2'; g.fillText(t, 0, 0); g.restore(); };
   for (const b of MAPA.barrios) rot(b.n, b.x, b.z, 9, 0);
+  for (const gk in GANGS) { const G = GANGS[gk]; g.fillStyle = G.css + '77'; g.beginPath(); g.arc(X(G.x), Y(G.z), 30 / k, 0, PI * 2); g.fill(); rot(G.name, G.x, G.z - 22, 8, 0); }
   for (const n of MAPA.nombres) if (n.size >= 26 && !MAPA.barrios.some(b => b.n === n.t) && n.t !== 'SAN AURELIO') rot(n.t, n.x, n.z, n.size >= 40 ? 11 : 8, n.rot);
   g.save(); g.translate(clamp(X(player.x), 8, W - 8), clamp(Y(player.z), 8, H - 8)); g.rotate(-player.yaw);
   g.fillStyle = '#ffc93c'; g.strokeStyle = '#1d1b2e'; g.lineWidth = 3; g.beginPath(); g.moveTo(0, -13); g.lineTo(10, 10); g.lineTo(0, 4); g.lineTo(-10, 10); g.closePath(); g.fill(); g.stroke(); g.restore();
@@ -3933,15 +3940,34 @@ function aggroGang(k, who) {
   G.aggro = 30;
 }
 function spawnGangster(k) {
-  const G = GANGS[k], sx = Math.random() < 0.5 ? 1 : -1, sz = Math.random() < 0.5 ? 1 : -1;
-  const alongZ = Math.random() < 0.5;
-  const hx = G.x + sx * (alongZ ? rand(6, 9) : rand(11, 18)), hz = G.z + sz * (alongZ ? rand(11, 18) : rand(6, 9));
+  const G = GANGS[k], N = G.nodo, e = pick(N.aristas), dir = e.a === NODOS.indexOf(N) ? 1 : -1, t = ptArista(e, dir, rand(N.r + 3, N.r + 14)), side = Math.random() < 0.5 ? 1 : -1, off = ASF[e.c] + rand(1, MEDIO[e.c] - ASF[e.c] - 0.6);
+  const hx = t.x - t.tz * off * side, hz = t.z + t.tx * off * side;
   if (Math.hypot(hx - player.x, hz - player.z) < 10) return;
   const rig = makePerson({ shirt: G.color, skin: pick(SKINS), pants: 0x1d1b2e, hair: 0x1e1a22, bandana: G.color, hood: Math.random() < 0.5, sleeveless: Math.random() < 0.3, scale: 1.05 });
   rig.tough = false;
   const gun = makeGun('pistola'); gun.position.y = -0.66; rig.armR.add(gun);
   const p = makePed(rig, hx, hz, 0, 1);
   p.gang = k; p.home = { x: hx, z: hz }; p.face = faceTo(G.x - hx, G.z - hz); p.hp = 5; p.cash = Math.round(rand(30, 60));
+}
+function armarBandas() {   // grafitis en las paredes de las esquinas y tachos con fuego en las cuatro ochavas
+  for (const k in GANGS) {
+    const G = GANGS[k], N = G.nodo, g = new THREE.Group(), dirs = N.aristas.map(e => { const t = ptArista(e, e.a === NODOS.indexOf(N) ? 1 : -1, 6); return Math.atan2(t.z - N.z, t.x - N.x); }).sort((a, b) => a - b);
+    for (let q = 0; q < dirs.length; q++) {
+      let a0 = dirs[q], a1 = dirs[(q + 1) % dirs.length]; if (a1 < a0) a1 += PI * 2; const am = (a0 + a1) / 2, r = N.r + 5.5;
+      const bx = N.x + Math.cos(am) * r, bz = N.z + Math.sin(am) * r; if (solidAt(bx, bz)) continue;
+      const bar = new THREE.Mesh(barrelGeo, barrelMat); bar.position.set(bx, hgt(bx, bz) + 0.72, bz); g.add(bar);
+      const fire = new THREE.Mesh(flameGeo, basic(0xff8a2a)); fire.position.set(bx, hgt(bx, bz) + 1.57, bz); g.add(fire); flames.push(fire);
+      const m = manzanaAt(N.x + Math.cos(am) * (N.r + 12), N.z + Math.sin(am) * (N.r + 12)); if (!m) continue;   // grafiti sobre el borde del lote, mirando a la esquina
+      const R = m.l; let ic = 0; R.forEach((v, i) => { if (Math.hypot(v[0] - N.x, v[1] - N.z) < Math.hypot(R[ic][0] - N.x, R[ic][1] - N.z)) ic = i; });
+      const [cx, cz] = R[ic];
+      for (const j of [(ic + 1) % R.length, (ic + R.length - 1) % R.length]) {   // una pared pintada sobre cada lado de la esquina
+        const dx = R[j][0] - cx, dz = R[j][1] - cz, L = Math.hypot(dx, dz); if (L < 6) continue;
+        const ux = dx / L, uz = dz / L, wx = cx + ux * 4, wz = cz + uz * 4;
+        const w = box(7, 2.8, 0.2, G.tagMat); w.position.set(wx, hgt(wx, wz) + 1.57, wz); w.rotation.y = Math.atan2(-uz, ux); g.add(w);
+      }
+    }
+    scene.add(g);
+  }
 }
 function updateGangs(dt) {
   if (!settings.gangs) return;
@@ -4012,11 +4038,10 @@ function copRig() {
 }
 function makeCop(x, z, dx, dz, o) { const p = makePed(copRig(), x, z, dx, dz, o); p.cop = true; p.hp = 6; p.tried = true; p.cash = Math.round(rand(20, 40)); return p; }
 function spawnPatrol() {   // one or two officers walking a beat along the pavement
-  const [fx, fz] = DIRS[player.h], side = Math.random() < 0.5 ? 1 : -1, lat = side * rand(7.2, 8.6), dist = rand(42, 58);
-  const pos = streetSpot(dist, lat), same = Math.random() < 0.35, dx = same ? fx : -fx, dz = same ? fz : -fz;
-  if (pos.z > COAST + 6 || zoneAt(pos.x, pos.z) === 'aeropuerto' || onHwy(pos.x, pos.z)) return;
-  makeCop(pos.x, pos.z, dx, dz, { speed: 1.15, lane: lat });
-  if (Math.random() < 0.35) { const l2 = lat - side * 1.0, p2 = streetSpot(dist, l2); makeCop(p2.x, p2.z, dx, dz, { speed: 1.15, lane: l2 }); }
+  const pos = lugarVereda(42, 58, player.aim); if (!pos || zoneAt(pos.x, pos.z) === 'aeropuerto') return;
+  const sg = Math.random() < 0.35 ? 1 : -1, dx = pos.tx * sg, dz = pos.tz * sg;
+  const a = makeCop(pos.x, pos.z, dx, dz, { speed: 1.15 });
+  if (Math.random() < 0.35) { const b = makeCop(pos.x + pos.tz * 0.9, pos.z - pos.tx * 0.9, dx, dz, { speed: 1.15 }); b.side = a.side; b.off = clamp(a.off + (a.off > 2 ? -0.9 : 0.9), 0.6, 5); }
 }
 function manStations() {   // guards at the door and a patrol car at the kerb whenever you come near a station
   for (const s of STATIONS) {
@@ -4045,45 +4070,55 @@ function drawWanted() {
   wantedTxt.textContent = sus ? 'SOSPECHOSO: QUE NO TE VEAN' : wanted.seen ? 'TE PERSIGUEN' : 'ESCONDIDO ' + Math.max(0, Math.ceil(8 - wanted.unseen)) + 's';
 }
 function spawnPoliceCar() {
-  const [fx, fz] = DIRS[player.h];
-  let alongZ = fx === 0;
-  if (Math.random() < 0.4) alongZ = !alongZ;
-  const center = alongZ ? nearest(player.x) : nearest(player.z);
-  const side = Math.random() < 0.5 ? 1 : -1;
-  const along = (alongZ ? player.z : player.x) + side * rand(55, 70);
-  const dx = alongZ ? 0 : -side, dz = alongZ ? -side : 0;
-  const x = alongZ ? center - dz * LANE : along, z = alongZ ? along : center + dx * LANE;
-  if (z > COAST + 4 || solidAt(x, z)) return;
-  const c = makeCar(x, z, faceTo(dx, dz), 'police', 'policia');
-  c.police = true; c.speed = 8; c.deployT = 0; c.stuckT = 0;
+  const L = lugarEnRed(55, 75, esCalleAuto); if (!L) return;
+  const dir = (player.x - L.x) * L.tx + (player.z - L.z) * L.tz >= 0 ? 1 : -1, tx = L.tx * dir, tz = L.tz * dir, off = CARRIL[L.e.c][0];
+  const x = L.x - tz * off, z = L.z + tx * off; if (!enTierra(x, z) || solidAt(x, z)) return;
+  const c = makeCar(x, z, faceTo(tx, tz), 'police', 'policia');
+  c.police = true; c.speed = 8; c.deployT = 0; c.stuckT = 0; c.ruta = { e: L.e, dir, s: dir > 0 ? L.al : L.e.len - L.al, next: null };
   seat(c, copRig());
 }
-function policeTarget(c) {
-  const onNS = Math.abs(c.x - nearest(c.x)) < 9, onEW = Math.abs(c.z - nearest(c.z)) < 9;
-  if (onNS && Math.abs(player.x - nearest(c.x)) < 9) return player;
-  if (onEW && Math.abs(player.z - nearest(c.z)) < 9) return player;
-  if (onNS && onEW) return Math.abs(player.x - c.x) > Math.abs(player.z - c.z) ? { x: nearest(player.x), z: nearest(c.z) } : { x: nearest(c.x), z: nearest(player.z) };
-  if (onNS) return { x: nearest(c.x), z: nearest(player.z) };
-  if (onEW) return { x: nearest(player.x), z: nearest(c.z) };
-  return player;
+/* distancia por calle desde cada esquina hasta el jugador (se recalcula cada tanto): los patrulleros eligen en
+   cada esquina la salida que más los acerca */
+let distJug = null, distJugT = 0;
+function calcDistJugador() {
+  const c = calleAt(player.x, player.z), D = new Float32Array(NODOS.length).fill(1e9); if (!c) { distJug = null; return; }
+  const [al] = proyectar(c.e, player.x, player.z); D[c.e.a] = al; D[c.e.b] = c.e.len - al; distJugE = { e: c.e, al };
+  const hecho = new Uint8Array(NODOS.length);
+  for (let it = 0; it < NODOS.length; it++) {
+    let u = -1, du = 1e9; for (let i = 0; i < D.length; i++) if (!hecho[i] && D[i] < du) { du = D[i]; u = i; }
+    if (u < 0) break; hecho[u] = 1;
+    for (const e of NODOS[u].aristas) { const v = otroNodo(e, u), dv = du + e.len; if (dv < D[v]) D[v] = dv; }
+  }
+  distJug = D;
 }
+let distJugE = null;
+const sesgoPolicia = (cand, n) => {
+  if (!distJug) return cand.cos;
+  if (distJugE && cand.e === distJugE.e) return -(n === cand.e.a ? distJugE.al : cand.e.len - distJugE.al);   // la calle donde está el jugador
+  return -(distJug[otroNodo(cand.e, n)] + cand.e.len);
+};
 function policeDrive(c, dt) {
   if (wanted.level === 0 || !c.driver) { c.ruta = null; c.state = c.driver ? 'drive' : 'parked'; return; }
   const dist = Math.hypot(player.x - c.x, player.z - c.z), onFoot = !player.car && !player.air;
   let target;
-  if (onFoot && dist < 20) {   // close to a runner on foot: stop and get out after them
+  if (onFoot && dist < 20 && (player.nivel || 0) === (c.nivel || 0)) {   // close to a runner on foot: stop and get out after them
     target = 0;
     if (c.speed < 1.5) { driverOut(c, false).angry = true; return; }
   } else if (c.rev > 0) { c.rev -= dt; target = -5; }
-  else {
-    const t = policeTarget(c), ex = t.x - c.x, ez = t.z - c.z, d = Math.hypot(ex, ez) || 1, want = faceTo(ex / d, ez / d);
+  else if (dist < 30 && (player.nivel || 0) === (c.nivel || 0) && losClear(c.x, c.z, player.x, player.z)) {   // a la vista: directo
+    const ex = player.x - c.x, ez = player.z - c.z, d = Math.hypot(ex, ez) || 1, want = faceTo(ex / d, ez / d);
     c.th = angLerp(c.th, want, Math.min(1, dt * 3.2));
-    let diff = want - c.th; while (diff > PI) diff -= 2 * PI; while (diff < -PI) diff += 2 * PI;
-    target = Math.abs(diff) > 0.8 ? 5 : 10.5 + wanted.level * 1.2;   // a bit slower than before, so a decent car can get away
+    const diff = angDiff(c.th, want);
+    target = Math.abs(diff) > 0.8 ? 5 : 10.5 + wanted.level * 1.2;
     if (!onFoot && dist < 14) target = Math.max(target, Math.min(Math.abs(player.car.speed) + 2, 15));   // ram
+    c.ruta = null;
+  } else {   // lejos: por las calles, con el camino más corto
+    if (!c.ruta) { const [fx, fz] = carF(c); c.ruta = rutaDesde(c.x, c.z, fx, fz, esCalleAuto); }
+    if (c.ruta) c.ruta.sesgo = sesgoPolicia;
+    const w = conducirIA(c, dt, true); target = Math.min(10.5 + wanted.level * 1.2, w.max);
   }
   c.speed = c.speed < target ? Math.min(target, c.speed + 8 * dt) : Math.max(target, c.speed - 16 * dt);
-  if (target > 3 && Math.abs(c.speed) < 1.2 && c.rev <= 0) { c.stuckT += dt; if (c.stuckT > 1.4) { c.stuckT = 0; c.rev = 0.9; } } else c.stuckT = 0;
+  if (target > 3 && Math.abs(c.speed) < 1.2 && c.rev <= 0) { c.stuckT += dt; if (c.stuckT > 1.4) { c.stuckT = 0; c.rev = 0.9; c.ruta = null; } } else c.stuckT = 0;
 }
 function updatePolice(dt) {
   if (!settings.police) return;
@@ -4097,6 +4132,7 @@ function updatePolice(dt) {
   }
   setWantedLevel();
   policeT -= dt; sirenT -= dt; blinkT += dt; patrolT -= dt;
+  distJugT -= dt; if (wanted.level > 0 && distJugT <= 0) { calcDistJugador(); distJugT = 1.5; }
   manStations();
   if (patrolT <= 0) { patrolT = rand(24, 40); if (peds.filter(p => p.cop && !p.station && p.state !== 'ko').length < 2) spawnPatrol(); }   // fewer officers walking the beat
   const lv = wanted.level;
@@ -5274,17 +5310,29 @@ function policeCalled(x, z) {
   wanted.pending = Math.min(6, wanted.pending + 2.5); drawWanted();
   setTimeout(() => { if (state === 'play' || state === 'inside') spawnPatrolCarTowards(x, z); }, rand(5000, 9000));
 }
-function laneTowards(x, z, dist) {   // a point on the right lane of the nearest street, `dist` metres away, heading to (x, z)
-  const ox = x - nearest(x), oz = z - nearest(z), alongZ = Math.abs(ox) < Math.abs(oz), side = alongZ ? (Math.sign(ox) || 1) : (Math.sign(oz) || 1);
-  const d = alongZ ? -side : side;   // drive on the lane that is on the same side of the street as the target
-  const dx = alongZ ? 0 : d, dz = alongZ ? d : 0, sx = alongZ ? nearest(x) - dz * LANE : x - dx * dist, sz = alongZ ? z - dz * dist : nearest(z) + dx * LANE;
-  return { sx, sz, dx, dz, alongZ, side };
+/* un lugar en el carril de la calle más cercana a (x, z), `dist` metros antes por calle, para llegar manejando
+   por la mano que queda del lado de (x, z). Devuelve el arranque, el recorrido armado y dónde frenar. */
+function laneTowards(x, z, dist) {
+  const c = calleAt(x, z); if (!c) return null;
+  const tdir = (x - c.px) * -c.dz + (z - c.pz) * c.dx >= 0 ? 1 : -1, [al] = proyectar(c.e, c.px, c.pz), tramos = [];
+  let e = c.e, dir = -tdir, s = dir > 0 ? al : c.e.len - al, rem = dist, g = 0;
+  while (rem > e.len - s && g++ < 8) {   // hacia atrás, anotando por dónde va a tener que pasar
+    rem -= e.len - s; const n = dir > 0 ? e.b : e.a, t = ptArista(e, dir, e.len), nx = elegirSalida(n, e, t.tx, t.tz, e2 => e2.c !== 3);
+    tramos.push({ e, dir: -dir }); if (!nx || nx.e === e) { rem = 0; s = e.len; break; }
+    e = nx.e; dir = nx.dir; s = 0;
+  }
+  const sb = Math.min(e.len, s + rem), t = ptArista(e, dir, sb), off = CARRIL[e.c][0], offT = CARRIL[c.e.c][0];
+  return {
+    sx: t.x + t.tz * off, sz: t.z - t.tx * off, dx: -t.tx, dz: -t.tz,
+    ruta: { e, dir: -dir, s: e.len - sb, next: null, plan: tramos.reverse() },
+    stopX: c.px - tdir * c.dz * offT, stopZ: c.pz + tdir * c.dx * offT
+  };
 }
 function spawnPatrolCarTowards(x, z) {
   const L = laneTowards(x, z, 45);
-  if (L.sz > COAST + 4 || onHwy(L.sx, L.sz) || solidAt(L.sx, L.sz) || cars.some(o => Math.hypot(o.x - L.sx, o.z - L.sz) < 7)) return;
+  if (!L || !enTierra(L.sx, L.sz) || solidAt(L.sx, L.sz) || cars.some(o => Math.hypot(o.x - L.sx, o.z - L.sz) < 7)) return;
   const c = makeCar(L.sx, L.sz, faceTo(L.dx, L.dz), wanted.level > 0 ? 'police' : 'drive', 'policia');
-  c.police = true; c.deployT = 0; c.stuckT = 0; c.speed = 7; c.cruise = 7; seat(c, copRig());
+  c.police = true; c.deployT = 0; c.stuckT = 0; c.speed = 7; c.cruise = 7; c.ruta = L.ruta; seat(c, copRig());
 }
 /* ambulance: two paramedics kneel by the person and try to bring them round */
 function medicRig() {
@@ -5297,7 +5345,7 @@ function updateMedics(dt) {
   if (!medicEv) {
     medicCd -= dt; if (medicCd > 0) return;
     medicCd = 2.5;
-    const vic = peds.find(p => p.state === 'ko' && !p.attended && !p.jobPatient && p.koT > 4 && p.z < COAST && Math.hypot(p.x - player.x, p.z - player.z) < 50 && !onHwy(p.x, p.z));
+    const vic = peds.find(p => p.state === 'ko' && !p.attended && !p.jobPatient && p.koT > 4 && !p.nivel && Math.hypot(p.x - player.x, p.z - player.z) < 50);
     if (!vic) return;
     vic.attended = true;
     if (Math.random() < 0.4) return;   // nobody bothered to call this time
@@ -5315,10 +5363,9 @@ function updateMedics(dt) {
     E.t -= dt; if (E.t > 0) return;
     if (v.state !== 'ko') { medicEv = null; return; }
     const L = laneTowards(v.x, v.z, 38);
-    if (L.sz > COAST + 4 || onHwy(L.sx, L.sz) || solidAt(L.sx, L.sz)) { medicEv = null; medicCd = 8; return; }
-    const car = makeCar(L.sx, L.sz, faceTo(L.dx, L.dz), 'medic', 'ambulancia'); seat(car, medicRig()); car.speed = 8;
-    // stop on the lane level with the patient
-    car.stopX = L.alongZ ? L.sx : v.x; car.stopZ = L.alongZ ? v.z : L.sz; car.medT = 0;
+    if (!L || !enTierra(L.sx, L.sz) || solidAt(L.sx, L.sz)) { medicEv = null; medicCd = 8; return; }
+    const car = makeCar(L.sx, L.sz, faceTo(L.dx, L.dz), 'medic', 'ambulancia'); seat(car, medicRig()); car.speed = 8; car.ruta = L.ruta;
+    car.stopX = L.stopX; car.stopZ = L.stopZ; car.medT = 0;   // frena en el carril, a la altura del herido
     E.car = car; E.stage = 'drive';
     if (Math.hypot(L.sx - player.x, L.sz - player.z) < 70) sfx('siren');
   } else if (E.stage === 'drive') {
@@ -5373,8 +5420,8 @@ function medicPed(p, dt) {
 }
 function medicDrive(c, dt) {   // drive straight down the lane, braking to stop level with the patient
   c.medT += dt;
-  const [fx, fz] = carF(c), ahead = (c.stopX - c.x) * fx + (c.stopZ - c.z) * fz;
-  const target = ahead > 0 ? Math.min(9, ahead * 0.9) : 0;
+  const w = conducirIA(c, dt, true), [fx, fz] = carF(c), ahead = (c.stopX - c.x) * fx + (c.stopZ - c.z) * fz, lejos = Math.hypot(c.stopX - c.x, c.stopZ - c.z);
+  const target = Math.min(9, w.max, lejos < 22 ? (ahead > 0 ? ahead * 0.9 : 0) : 9);
   c.speed = c.speed < target ? Math.min(target, c.speed + 6 * dt) : Math.max(target, c.speed - 12 * dt);
   if (c.g.userData.bar) { const on = Math.floor(elapsed * 6) % 2; c.g.userData.bar[0].visible = !!on; c.g.userData.bar[1].visible = !on; }
 }
@@ -5810,6 +5857,7 @@ function frame(now) {
 }
 asignarCeldas();
 armarAutopistas();
+armarBandas();
 if (ETAPA_MAPA >= 2) updateBlocks();
 setupCars();
 if (ETAPA_MAPA >= 6) { initAirport(); initPort(); }
