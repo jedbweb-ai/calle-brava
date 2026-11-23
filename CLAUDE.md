@@ -72,6 +72,18 @@ aeropuerto/aviones → **negocios y robos** (`BIZ`, `bizOf`, `buildRoom`, `enter
 - **Difusión:** se hizo una imagen promocional para historia de Instagram con ChatGPT (estilo póster de mundo abierto) a partir de capturas verticales sin HUD; para capturas nuevas, ocultar `#hud,#controls,#hint,#zone,#aim,#raceNav,#heist,#enter,.pop` y usar 540×960 con deviceScaleFactor 2.
 - Opciones guardadas en `localStorage['calle-brava-settings']`; récord en `localStorage['calle-brava-best']`.
 
+## La ciudad hoy (agrandada de a poco sobre la cuadrícula de 48 m)
+
+- **Bordes:** al oeste, pasando la calle `XW = -13P`, playa y mar; al este, pasando `XE = 13P`, rambla de cemento con murito y mar; al sur la costa de siempre;
+  al norte, pasando `ZN = -13P`, la **sierra**. `fuera(x, z, m)` dice si un punto pasó la última calle (spawns, giros de los autos, arena).
+  `enArena` frena los autos solo en las playas. `planTurn` no deja doblar hacia afuera de la ciudad.
+- **Villa Obrera** (`obrero`, i −13..−10, j −6..1): monoblocks (`buildMonoblocks`, `monoMat`) y canchitas caminables (`cancha` en `specialOf`/`buildSpecial`/`lotObs`).
+- **La sierra** (`sierra`, j·P < ZN): relieve = loma + `CERROS` (gaussianas) con la hoya del `LAGO`; malla propia (`armarSierra`), bosque instanciado (`ARBOLES_S`, también obstáculos),
+  ruta de montaña `RUTA_S` desde la calle x = 0 hasta un mirador, y el mar del norte (`SHORE_N`). El piso de calles queda hundido debajo (`updateGroundHeights`).
+- **Autopista del Sur elevada** (`AU`, `auElev`, `deckAt`, `nivelEntidad`, `armarAutopistaSur`): por el medio de la fila j = 3 (zona `bajoau`, estacionamientos debajo),
+  a 5 m, con bajadas en las dos costas y en el cruce a nivel con la calle x = 0. Autos y jugador tienen `nivel`/`y`; arriba circulan autos `state 'au'` (`spawnAutoAU`).
+- **Aeropuerto** más grande (`AP`: i −9..−6, j −6..1, pista en `RWX = -400`, terminal con mangas, torre, dos hangares) y **puerto** más ancho (`PORT` hasta 12P, 4 grúas, 3 buques).
+
 ## Intento de mapa nuevo "San Aurelio" (descartado)
 
 Se intentó reemplazar la ciudad por un atlas externo (isla con barrios girados, diagonales y autopistas con tréboles). Quedó en la rama

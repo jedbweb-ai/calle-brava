@@ -411,7 +411,7 @@ function sierraAlto(x, z) {   // lo que la sierra le suma a la loma (y el pozo d
 }
 /* Two motorways replace ordinary streets: one east-west under the hill, one north-south down to the port.
    The port is a concrete quay that reaches out past the beach line, east of the city. */
-const HWZ = -7 * P, HWX = 4 * P, PORT = { x0: 6 * P - HALF, x1: 10 * P + HALF, reach: 20 };
+const HWZ = -7 * P, HWX = 4 * P, PORT = { x0: 6 * P - HALF, x1: 12 * P + HALF, reach: 32 };
 const hwyX = (x, z) => Math.abs(x - HWX) < HALF && z > HWZ - HALF && z < COAST + HALF;
 const hwyZ = (z, x) => Math.abs(z - HWZ) < HALF && (x === undefined || (x > XW - HALF && x < XE + HALF));
 const onHwy = (x, z) => hwyZ(z, x) || hwyX(x, z);
@@ -421,8 +421,8 @@ function hwySide(i, j, s) {   // does this face of the block look onto a motorwa
   const col = j >= -7 && j <= 5;
   return s === 0 ? i * P === HWX && col : s === 1 ? (i + 1) * P === HWX && col : s === 2 ? j * P === HWZ : (j + 1) * P === HWZ;
 }
-const AP = { x0: -8 * P, x1: -5 * P, z0: -3 * P, z1: P }, RWX = -344;
-const AP_OBS = [[-259, -245, -95, -25], [-264.5, -259.5, -127.5, -122.5], [-274, -250, 5, 35]];   // terminal, tower, hangar
+const AP = { x0: -9 * P, x1: -5 * P, z0: -6 * P, z1: 2 * P }, RWX = -400;
+const AP_OBS = [[-263, -249, -205, -75], [-264.5, -259.5, -257.5, -252.5], [-274, -250, 5, 35], [-312, -288, 45, 75]];   // terminal, torre, hangares
 function hgt(x, z) {
   const d = HILL_Z - z; if (d <= 0) return 0;
   const costa = clamp((x - XW + HALF) / 110, 0, 1) * clamp((XE + HALF - x) / 110, 0, 1) * clamp((z - SHORE_N) / 150, 0, 1);   // baja hasta el mar a los costados y al norte
@@ -432,9 +432,9 @@ function districtOf(i, j) {
   if (j * P < ZN) return 'sierra';
   if (j === 3 && i * P >= XW && i * P < XE) return 'bajoau';   // la fila de manzanas debajo de la autopista elevada
   if (j >= 6 || i * P < XW || i * P >= XE) return 'playa';
-  if (i >= -8 && i <= -6 && j >= -3 && j <= 0) return 'aeropuerto';
+  if (i >= -9 && i <= -6 && j >= -6 && j <= 1) return 'aeropuerto';
   if (j <= -8) return 'colina';
-  if (i >= 6 && i <= 9 && j >= 4) return 'puerto';
+  if (i >= 6 && i <= 11 && j >= 4) return 'puerto';
   if (i >= 8) return 'industrial';
   if (i >= 4) return j >= 2 ? 'paseo' : 'torres';
   if (i >= -13 && i <= -10 && j >= -6 && j <= 1) return 'obrero';   // Villa Obrera: monoblocks y canchitas
@@ -1906,13 +1906,13 @@ function initPort() {
   put(tbox(W, 0.5, D, quayMat, 6), cx, -0.13, z0 + D / 2);
   put(box(W, 0.14, 0.9, hazardMat), cx, 0.13, z1 - 0.45);
   for (let x = PORT.x0 + 8; x < PORT.x1; x += 14) put(new THREE.Mesh(barrelGeo, mat(0x2b2838)), x, 0.5, z1 - 1.6).scale.set(0.7, 0.8, 0.7);
-  for (const [k, dx] of [[0, -74], [1, 0], [2, 74]]) {   // gantry cranes
+  for (const [k, dx] of [[0, -120], [1, -40], [2, 40], [0, 120]]) {   // gantry cranes
     const col = mat(k === 1 ? 0x2f6f9a : 0xf2b632), x = cx + dx;
     for (const sx of [-5.5, 5.5]) for (const sz of [-3, -14]) put(box(0.9, 17, 0.9, col), x + sx, 8.5, z1 + sz);
     put(box(12, 1.3, 12.5, col), x, 17.3, z1 - 8.5); put(box(2.2, 1.4, 38, col), x, 18.7, z1 + 3); put(box(3, 2.6, 3, whiteMat), x, 16, z1 + 2);
     put(box(0.15, 8, 0.15, mat(0x2b2838)), x, 14, z1 + 14); put(box(6, 2.6, 2.5, contMats[k]), x, 8.8, z1 + 14);
   }
-  for (const [dx, hull] of [[-60, 0x1d2440], [62, 0x3a3a44]]) {   // cargo ships alongside
+  for (const [dx, hull] of [[-95, 0x1d2440], [0, 0x3a3a44], [95, 0x7a2a2a]]) {   // cargo ships alongside
     const x = cx + dx, z = z1 + 9;
     put(box(52, 2.6, 11.5, mat(0xa83228)), x, 0.6, z); put(box(52, 3.6, 11.5, mat(hull)), x, 3.7, z); put(box(52.2, 0.3, 11.7, whiteMat), x, 5.6, z);
     for (let a = 0; a < 5; a++) for (let b = 0; b < 3; b++) containerStack(g, x - 14 + a * 6.6, z - 3.2 + b * 3.2, 1 + ((rng() * 3) | 0), rng, false);
@@ -3149,7 +3149,7 @@ function drawBigMap() {
   for (const k in GANGS) { const G = GANGS[k]; g.fillStyle = G.css + '77'; g.beginPath(); g.arc(X(G.x), Y(G.z), 30 / P * c, 0, PI * 2); g.fill(); }
   for (const s of STATIONS) { g.fillStyle = '#3b6aff'; g.strokeStyle = '#fff4e2'; g.lineWidth = 2; g.fillRect(X(s.x) - 7, Y(s.z) - 9, 14, 12); g.strokeRect(X(s.x) - 7, Y(s.z) - 9, 14, 12); }
   g.font = '900 15px "Arial Black", Impact, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.lineJoin = 'round';
-  for (const [t, bi, bj] of [['LA LOMA', 0.5, -9.5], ['EL CENTRO', 0.5, -1.5], ['PARQUE', 0, 4], ['MICROCENTRO', 6, -4.5], ['PASEO', 5, 3], ['EL PUERTO', 8, 6.45], ['ZONA INDUSTRIAL', 11, -1], ['BARRIO RESIDENCIAL', -8.4, -5.5], ['CASITAS', -8, 4], ['AEROPUERTO', -6.5, -3.4], ['LA COSTA', -4, 6.5], ['PLAYA OESTE', -12.3, 0.5], ['LA SIERRA', -7, -21], ['AUTOPISTA DEL SUR', -8, 3.15], ['EL LAGO', -0.8, -15.6], ['MIRADOR', -6.9, -19.5], ['VILLA OBRERA', -11.5, -2.6], ['RAMBLA', 12.6, 0.5], ['AUTOPISTA NORTE', -7, -7], ['ROJOS', -2, 2], ['AZULES', 2, -3]]) {
+  for (const [t, bi, bj] of [['LA LOMA', 0.5, -9.5], ['EL CENTRO', 0.5, -1.5], ['PARQUE', 0, 4], ['MICROCENTRO', 6, -4.5], ['PASEO', 5, 3], ['EL PUERTO', 8, 6.45], ['ZONA INDUSTRIAL', 11, -1], ['BARRIO RESIDENCIAL', -8.4, -5.5], ['CASITAS', -8, 4], ['AEROPUERTO', -7, -2.2], ['LA COSTA', -4, 6.5], ['PLAYA OESTE', -12.3, 0.5], ['LA SIERRA', -7, -21], ['AUTOPISTA DEL SUR', -8, 3.15], ['EL LAGO', -0.8, -15.6], ['MIRADOR', -6.9, -19.5], ['VILLA OBRERA', -11.5, -2.6], ['RAMBLA', 12.6, 0.5], ['AUTOPISTA NORTE', -7, -7], ['ROJOS', -2, 2], ['AZULES', 2, -3]]) {
     g.lineWidth = 4; g.strokeStyle = '#1d1b2e'; g.strokeText(t, X(bi * P), Y(bj * P)); g.fillStyle = '#fff4e2'; g.fillText(t, X(bi * P), Y(bj * P));
   }
   g.save(); g.translate(clamp(X(player.x), 8, 792), clamp(Y(player.z), 8, 632)); g.rotate(-player.yaw);
@@ -3976,37 +3976,41 @@ function addAircraft(type, x, z, yaw) {
 function resetAircraft() {
   for (const a of aircraft) { a.x = a.home.x; a.z = a.home.z; a.yaw = a.home.yaw; a.y = hgt(a.x, a.z); a.pitch = a.roll = a.speed = a.vy = 0; placeAir(a); }
 }
-function initAirport() {
-  const g = new THREE.Group(), cx = (AP.x0 + AP.x1) / 2, cz = (AP.z0 + AP.z1) / 2;
+function initAirport() {   // pista larga al oeste, terminal grande al este, torre, dos hangares y helipuertos
+  const g = new THREE.Group(), cx = (AP.x0 + AP.x1) / 2, cz = (AP.z0 + AP.z1) / 2, W = AP.x1 - AP.x0, D = AP.z1 - AP.z0;
   const flat = (w, d, col, x, z, y, tm) => { const m = new THREE.Mesh(new THREE.PlaneGeometry(w, d), tm || mat(col)); m.rotation.x = -PI / 2; m.position.set(x, y, z); g.add(m); return m; };
-  flat(AP.x1 - AP.x0 - 2, AP.z1 - AP.z0 - 2, 0x7a7680, cx, cz, 0.045, lam(concreteCv, 0xcac6ce, 142 / 6, 190 / 6));
-  flat(22, 176, 0x3a3842, RWX, cz, 0.055, lam(asphaltCv, 0xd2d0da, 22 / 8, 22));
-  for (let z = AP.z0 + 22; z < AP.z1 - 22; z += 12) flat(0.8, 6, 0xf4f1ea, RWX, z, 0.06);
-  for (const zz of [AP.z0 + 10, AP.z1 - 10]) for (let k = -4; k <= 4; k++) if (k) flat(1, 5, 0xf4f1ea, RWX + k * 2, zz, 0.06);
-  const taxi = lam(asphaltCv, 0xffffff, 4.5, 1); flat(36, 8, 0x55525c, -315, -100, 0.05, taxi); flat(36, 8, 0x55525c, -315, -40, 0.05, taxi);
-  for (const [x, z] of [[-292, 22], [-308, 22]]) {
+  flat(W - 2, D - 2, 0x7a7680, cx, cz, 0.045, lam(concreteCv, 0xcac6ce, W / 6, D / 6));
+  flat(22, D - 24, 0x3a3842, RWX, cz, 0.055, lam(asphaltCv, 0xd2d0da, 22 / 8, (D - 24) / 8));
+  for (let z = AP.z0 + 24; z < AP.z1 - 24; z += 12) flat(0.8, 6, 0xf4f1ea, RWX, z, 0.06);
+  for (const zz of [AP.z0 + 16, AP.z1 - 16]) for (let k = -4; k <= 4; k++) if (k) flat(1, 5, 0xf4f1ea, RWX + k * 2, zz, 0.06);
+  const taxi = lam(asphaltCv, 0xffffff, 120 / 8, 1);
+  for (const z of [-200, -140, -80]) flat(130, 9, 0x55525c, RWX + 11 + 65, z, 0.05, taxi);   // calles de rodaje hasta la plataforma
+  for (const [x, z] of [[-300, 22], [-318, 22]]) {
     const pad = new THREE.Mesh(new THREE.CircleGeometry(4.2, 24), asphaltPlainMat); pad.rotation.x = -PI / 2; pad.position.set(x, 0.06, z); g.add(pad);
     for (const dx of [-0.9, 0.9]) { const s1 = box(0.4, 0.03, 3, whiteMat); s1.position.set(x + dx, 0.08, z); g.add(s1); }
     const s2 = box(1.8, 0.03, 0.4, whiteMat); s2.position.set(x, 0.08, z); g.add(s2);
   }
-  const term = tbox(14, 9, 70, lam(panelCv, 0xffffff, 1), 4.5); term.position.set(-252, 4.5, -60); g.add(term);
-  const band = tbox(14.1, 3, 70.1, villaGlassMat, 3); band.position.set(-252, 5, -60); g.add(band);
-  const roof = box(16, 0.5, 72, mat(0x3a3a44)); roof.position.set(-252, 9.2, -60); g.add(roof);
-  const sign = new THREE.Mesh(new THREE.PlaneGeometry(20, 2.4), new THREE.MeshBasicMaterial({ map: signTexture('AEROPUERTO') }));
-  sign.rotation.y = PI / 2; sign.position.set(-244.8, 7.4, -60); g.add(sign);
-  const sign2 = sign.clone(); sign2.rotation.y = -PI / 2; sign2.position.set(-259.2, 7.4, -60); g.add(sign2);
-  const tower = new THREE.Mesh(new THREE.CylinderGeometry(1.6, 2, 22, 12), lam(panelCv, 0xffffff, 4, 6)); tower.position.set(-262, 11, -125); g.add(tower);
-  const cab = box(5, 3, 5, glassMat); cab.position.set(-262, 23.5, -125); g.add(cab);
-  const cr = box(6, 0.4, 6, mat(0x3a3a44)); cr.position.set(-262, 25.2, -125); g.add(cr);
-  const bea = box(0.5, 0.5, 0.5, basic(0xff3030)); bea.position.set(-262, 25.7, -125); g.add(bea);
-  const hang = tbox(24, 11, 30, lam(metalCv, 0xc6cad2, 1), 3); hang.position.set(-262, 5.5, 20); g.add(hang);
-  const hroof = new THREE.Mesh(new THREE.CylinderGeometry(15, 15, 30, 16, 1, false, 0, PI), lam(metalCv, 0xaeb3bd, 1, 10)); hroof.rotation.set(PI / 2, 0, PI / 2); hroof.scale.set(1, 1, 0.25); hroof.position.set(-262, 11, 20); g.add(hroof);
-  const door = box(0.2, 9, 24, lam(metalCv, 0x5a5a66, 10, 1)); door.position.set(-274.15, 4.5, 20); g.add(door);
-  const sp = new THREE.Mesh(poleGeo, mat(0x2b2838)); sp.position.set(-326, 2.1, -122); g.add(sp);
-  const sock = new THREE.Mesh(new THREE.ConeGeometry(0.4, 2.2, 8, 1, true), mat(0xff7a2a)); sock.rotation.z = PI / 2; sock.position.set(-325, 4, -122); g.add(sock);
+  const term = tbox(14, 10, 130, lam(panelCv, 0xffffff, 1), 4.5); term.position.set(-256, 5, -140); g.add(term);
+  const band = tbox(14.1, 3.2, 130.1, villaGlassMat, 3); band.position.set(-256, 5.5, -140); g.add(band);
+  const roof = box(17, 0.5, 133, mat(0x3a3a44)); roof.position.set(-256, 10.2, -140); g.add(roof);
+  for (const z of [-185, -140, -95]) { const m = box(18, 3, 3, lam(panelCv, 0xdfe3ea, 1)); m.position.set(-272, 5.5, z); g.add(m); }   // mangas hacia la plataforma
+  const sign = new THREE.Mesh(new THREE.PlaneGeometry(26, 3), new THREE.MeshBasicMaterial({ map: signTexture('AEROPUERTO') }));
+  sign.rotation.y = PI / 2; sign.position.set(-248.8, 8, -140); g.add(sign);
+  const sign2 = sign.clone(); sign2.rotation.y = -PI / 2; sign2.position.set(-263.2, 8, -140); g.add(sign2);
+  const tower = new THREE.Mesh(new THREE.CylinderGeometry(1.8, 2.3, 26, 12), lam(panelCv, 0xffffff, 4, 6)); tower.position.set(-262, 13, -255); g.add(tower);
+  const cab = box(6, 3.5, 6, glassMat); cab.position.set(-262, 27.6, -255); g.add(cab);
+  const cr = box(7, 0.4, 7, mat(0x3a3a44)); cr.position.set(-262, 29.6, -255); g.add(cr);
+  const bea = box(0.5, 0.5, 0.5, basic(0xff3030)); bea.position.set(-262, 30.1, -255); g.add(bea);
+  for (const [hx, hz] of [[-262, 20], [-300, 60]]) {
+    const hang = tbox(24, 11, 30, lam(metalCv, 0xc6cad2, 1), 3); hang.position.set(hx, 5.5, hz); g.add(hang);
+    const hroof = new THREE.Mesh(new THREE.CylinderGeometry(15, 15, 30, 16, 1, false, 0, PI), lam(metalCv, 0xaeb3bd, 1, 10)); hroof.rotation.set(PI / 2, 0, PI / 2); hroof.scale.set(1, 1, 0.25); hroof.position.set(hx, 11, hz); g.add(hroof);
+    const door = box(0.2, 9, 24, lam(metalCv, 0x5a5a66, 10, 1)); door.position.set(hx - 12.15, 4.5, hz); g.add(door);
+  }
+  const sp = new THREE.Mesh(poleGeo, mat(0x2b2838)); sp.position.set(-372, 2.1, -250); g.add(sp);
+  const sock = new THREE.Mesh(new THREE.ConeGeometry(0.4, 2.2, 8, 1, true), mat(0xff7a2a)); sock.rotation.z = PI / 2; sock.position.set(-371, 4, -250); g.add(sock);
   scene.add(g);
-  addAircraft('avioneta', -300, -100, 0); addAircraft('jet', -300, -45, 0);
-  addAircraft('heli', -292, 22, 0); addAircraft('heli', -308, 22, 0);
+  addAircraft('avioneta', -300, -200, 0); addAircraft('jet', -300, -140, 0); addAircraft('jet', -300, -80, 0);
+  addAircraft('heli', -300, 22, 0); addAircraft('heli', -318, 22, 0);
 }
 function enterAir(a) {
   if (state !== 'play' || player.car || player.air || player.down) return;
