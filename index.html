@@ -356,7 +356,7 @@ const nearest = v => Math.round(v / P) * P;
 function inCross(x, z) { return Math.abs(x - nearest(x)) < CROSS && Math.abs(z - nearest(z)) < CROSS; }
 /* Districts: centre around the start, towers to the east, houses to the west,
    a rich hillside to the north (the ground really climbs) and the coast to the south. Parks are sprinkled in. */
-const COAST = 6 * P, HILL_Z = -7 * P - 20, SHORE = COAST + HALF + 32;
+const COAST = 1e5, HILL_Z = -7 * P - 20, SHORE = COAST + HALF + 32;   // (cuadrícula vieja: la costa ahora es un polígono)
 /* Two motorways replace ordinary streets: one east-west under the hill, one north-south down to the port.
    The port is a concrete quay that reaches out past the beach line, east of the city. */
 const HWZ = -7 * P, HWX = 4 * P, PORT = { x0: 6 * P - HALF, x1: 10 * P + HALF, reach: 20 };
@@ -496,7 +496,7 @@ function buildAlley(g, x0, z0, alley) {
    - manzanas: v = manzana con vereda (sin la calzada), l = lote edificable, z = zona, b = barrio
    - costa, lagos, playas: polígonos; alturas: grilla 128x128; suelo: grilla 256x256 (mar, agua, arena, pasto, cemento) */
 const MAPA = JSON.parse(document.getElementById('mapa-datos').textContent);
-const ETAPA_MAPA = 3;   // hasta dónde llegó la migración: lo que todavía depende de la cuadrícula vieja queda apagado
+const ETAPA_MAPA = 4;   // hasta dónde llegó la migración: lo que todavía depende de la cuadrícula vieja queda apagado
 const ASF = [4.5, 6.5, 11, 3.8, 0, 0, 0, 3.4], MEDIO = [9, 11, 16, 6, 0, 0, 0, 6.5];   // medio ancho de calzada y de calle con veredas, por clase (7 = pasaje del Microcentro)
 const ISLA = { x0: -2090 * MAPA.escala, z0: -2700 * MAPA.escala, size: 4000 * MAPA.escala };
 const pares = f => { const o = []; for (let k = 0; k < f.length; k += 2) o.push([f[k], f[k + 1]]); return o; };
@@ -639,6 +639,93 @@ function enEsquina(x, z) {
   for (const s of cel.segs) for (const n of [NODOS[s.e.a], NODOS[s.e.b]]) if (n.aristas.length > 2 && Math.hypot(n.x - x, n.z - z) < n.r + 3) return true;
   return false;
 }
+
+/* ---------- recorridos sobre la red de calles ----------
+   Un recorrido es { e: tramo, dir: 1 si va de a hacia b, s: metros avanzados desde la esquina de salida }.
+   Autos y peatones avanzan por el tramo y en cada esquina eligen el siguiente (seguir, doblar o, si no hay
+   salida, volver). El lado derecho de la marcha es (-tz, tx) con (tx, tz) la dirección de avance. */
+const otroNodo = (e, n) => e.a === n ? e.b : e.a;
+function ptArista(e, dir, s) {   // punto y dirección a `s` metros desde la esquina de salida
+  const sa = clamp(dir > 0 ? s : e.len - s, 0, e.len);
+  let g = e.segs[0]; for (const q of e.segs) { if (q.s0 <= sa) g = q; else break; }
+  const t = clamp((sa - g.s0) / (g.len || 1), 0, 1), L = g.len || 1;
+  return { x: g.ax + (g.bx - g.ax) * t, z: g.az + (g.bz - g.az) * t, tx: (g.bx - g.ax) / L * dir, tz: (g.bz - g.az) / L * dir };
+}
+function proyectar(e, x, z) {   // cuánto avanzó (desde a) la proyección de (x, z) sobre el tramo, y a qué distancia quedó
+  let best = 0, bd = 1e9;
+  for (const g of e.segs) {
+    const dx = g.bx - g.ax, dz = g.bz - g.az, t = clamp(((x - g.ax) * dx + (z - g.az) * dz) / (g.len * g.len || 1), 0, 1), d = Math.hypot(x - g.ax - dx * t, z - g.az - dz * t);
+    if (d < bd) { bd = d; best = g.s0 + g.len * t; }
+  }
+  return [best, bd];
+}
+/* en la esquina `n`, viniendo por el tramo `e` con dirección (tx, tz): el próximo tramo */
+function elegirSalida(n, e, tx, tz, ok = () => true, sesgo = null) {
+  const N = NODOS[n], cand = [];
+  for (const e2 of N.aristas) {
+    if (e2 === e || !ok(e2)) continue;
+    const dir = e2.a === n ? 1 : -1, p = ptArista(e2, dir, Math.min(6, e2.len / 2)), ox = p.x - N.x, oz = p.z - N.z, L = Math.hypot(ox, oz) || 1;
+    const cos = (ox * tx + oz * tz) / L, cruz = tx * oz - tz * ox;   // cruz > 0: dobla a la derecha
+    if (cos < -0.6) continue;   // casi una vuelta en U
+    cand.push({ e: e2, dir, cos, cruz });
+  }
+  if (!cand.length) return ok(e) ? { e, dir: e.a === n ? 1 : -1 } : null;   // calle sin salida: vuelve
+  if (sesgo) { cand.sort((a, b) => sesgo(b) - sesgo(a)); return cand[0]; }
+  const derecho = cand.reduce((a, b) => b.cos > a.cos ? b : a), r = Math.random();
+  if (r < 0.5 && derecho.cos > 0.7) return derecho;
+  return cand[(Math.random() * cand.length) | 0];
+}
+function rutaDesde(x, z, fx, fz, ok = () => true) {   // engancha un recorrido en la calle más cercana, en el sentido (fx, fz)
+  const c = calleAt(x, z); if (!c || !ok(c.e)) return null;
+  const dir = c.dx * fx + c.dz * fz >= 0 ? 1 : -1, [al] = proyectar(c.e, x, z);
+  return { e: c.e, dir, s: dir > 0 ? al : c.e.len - al, next: null };
+}
+/* punto adelantado `d` metros sobre el recorrido (cruzando esquinas si hace falta: elige y guarda la salida) */
+function adelante(R, d, ok) {
+  let e = R.e, dir = R.dir, s = R.s + d, nx = R.next, guard = 0;
+  while (s > e.len && guard++ < 4) {
+    const n = dir > 0 ? e.b : e.a, t = ptArista(e, dir, e.len);
+    if (!nx) { nx = elegirSalida(n, e, t.tx, t.tz, ok); if (e === R.e) R.next = nx; }
+    if (!nx) return ptArista(e, dir, e.len);
+    s -= e.len; e = nx.e; dir = nx.dir; nx = null;
+  }
+  return ptArista(e, dir, Math.max(0, s));
+}
+function avanzarRuta(R, x, z, ok) {   // actualiza s con la posición real y pasa al tramo siguiente al llegar a la esquina
+  const [al, dd] = proyectar(R.e, x, z); R.s = R.dir > 0 ? al : R.e.len - al;
+  const nf = R.dir > 0 ? R.e.b : R.e.a;
+  if (R.s >= R.e.len - Math.min(NODOS[nf].r, R.e.len * 0.3)) {   // ya entró en la esquina: pasa al tramo siguiente
+    const n = nf, t = ptArista(R.e, R.dir, R.e.len);
+    const nx = R.next || elegirSalida(n, R.e, t.tx, t.tz, ok); if (!nx) return dd;
+    R.e = nx.e; R.dir = nx.dir; R.next = null; const [a2] = proyectar(R.e, x, z); R.s = R.dir > 0 ? a2 : R.e.len - a2;
+  }
+  return dd;
+}
+const esCiudad = e => e.c !== 3, esCalleAuto = e => true;
+/* un lugar sobre la red, a una distancia del jugador entre dmin y dmax; filtro(e) elige qué tramos sirven */
+function lugarEnRed(dmin, dmax, filtro = () => true, adelanteDe = null) {
+  for (let k = 0; k < 30; k++) {
+    const a = adelanteDe !== null && Math.random() < 0.7 ? adelanteDe + rand(-0.9, 0.9) : rand(0, PI * 2), d = rand(dmin, dmax);
+    const x = player.x - Math.sin(a) * d, z = player.z - Math.cos(a) * d, c = calleAt(x, z);
+    if (!c || c.d > 25 || !filtro(c.e)) continue;
+    const [al] = proyectar(c.e, c.px, c.pz); if (al < NODOS[c.e.a].r + 3 || al > c.e.len - NODOS[c.e.b].r - 3) continue;
+    return { e: c.e, al, x: c.px, z: c.pz, tx: c.dx, tz: c.dz };
+  }
+  return null;
+}
+/* lo de antes, reescrito sobre la red: un punto `dist` metros adelante del jugador por su calle, desplazado `lat` a la derecha */
+function streetSpot(dist, lat) {
+  const fx = -Math.sin(player.aim), fz = -Math.cos(player.aim), R = rutaDesde(player.x, player.z, fx, fz);
+  if (!R) return { x: player.x + fx * dist, z: player.z + fz * dist };
+  const p = adelante(R, dist, esCiudad);
+  return { x: p.x - p.tz * lat, z: p.z + p.tx * lat };
+}
+function lateralOf(x, z) {   // a qué distancia del eje de su calle está (x, z), positivo a la derecha de hacia donde mira el jugador
+  const c = calleAt(x, z); if (!c) return 0;
+  const fx = -Math.sin(player.aim), fz = -Math.cos(player.aim), sg = c.dx * fx + c.dz * fz >= 0 ? 1 : -1;
+  return ((x - c.px) * -c.dz + (z - c.pz) * c.dx) * sg;
+}
+function tieneVereda(x, z) { return !!manzanaAt(x, z) || PLAZOLETAS.some(pz => Math.abs(pz[0][0] - x) < 80 && inPoly(x, z, pz)); }
 
 /* ---------- renderer / scene ---------- */
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -2424,12 +2511,6 @@ const HAIRS = [0x1e1a22, 0x5a3a24, 0xc9a25a, 0x8a3b2a, 0x9a9aa0];
 const PANTS = [0x2f3a5a, 0x3b3b3b, 0x6b5a45, 0x2a4a3a, 0x8a7a68];
 const peds = [], pickups = [];
 let elapsed = 0;
-function streetSpot(dist, lat) {
-  const [fx, fz] = DIRS[player.h];
-  if (fx === 0) return { x: nearest(player.x) + lat, z: player.z + fz * dist };
-  return { x: player.x + fx * dist, z: nearest(player.z) + lat };
-}
-function lateralOf(x, z, dx) { return dx === 0 ? x - nearest(x) : z - nearest(z); }
 const TOURIST_SHIRTS = [0xff7a5c, 0x4fc3e8, 0xffd23c, 0xf28ab2, 0x7ed37a, 0xffffff];
 function randomRig(tough, tourist) {   // men and women, young and old, each dressed differently
   const skin = pick(SKINS), female = Math.random() < (tough ? 0.15 : 0.5), old = !tough && Math.random() < 0.12, r = Math.random();
@@ -2456,10 +2537,11 @@ function alarm(x, z, rad, shot, except) {
   }
 }
 function makePed(rig, x, z, dx, dz, o = {}) {
-  const tough = !!rig.tough, lat = lateralOf(x, z, dx);
+  const tough = !!rig.tough, ruta = rutaDesde(x, z, dx, dz, esCiudad);
+  let side = 1, off = rand(0.9, 3.6);
+  if (ruta) { const t = ptArista(ruta.e, ruta.dir, ruta.s), lat = (x - t.x) * -t.tz + (z - t.z) * t.tx; side = lat >= 0 ? 1 : -1; off = clamp(Math.abs(lat) - ASF[ruta.e.c], 0.7, MEDIO[ruta.e.c] - ASF[ruta.e.c] - 0.5); }
   const p = {
-    rig, tough, weapon: o.weapon || null, x, z, dx, dz,
-    lane: o.lane || (lat >= 0 ? 1 : -1) * rand(6.3, 9.0),
+    rig, tough, weapon: o.weapon || null, x, z, dx, dz, ruta, side, off,
     hp: tough ? 8 : 3 + Math.floor(elapsed / 120), dmg: tough ? 2 : 1,
     speed: (o.speed || rand(1.0, 1.8) * (tough ? 0.85 : 1)) * (rig.old && !o.speed ? 0.65 : 1), scared: 0,
     mood: tough ? 'fight' : (m => rig.old || rig.tourist ? (m < 0.85 ? 'flee' : 'calm') : m < 0.5 ? 'flee' : m < 0.75 ? 'fight' : 'calm')(Math.random()),
@@ -2470,31 +2552,39 @@ function makePed(rig, x, z, dx, dz, o = {}) {
   peds.push(p);
   return p;
 }
+/* un lugar sobre una vereda cerca del jugador: { x, z, tx, tz } (tx, tz = sentido de la calle); null si no encontró */
+function lugarVereda(dmin, dmax, adelanteDe = null) {
+  for (let k = 0; k < 8; k++) {
+    const L = lugarEnRed(dmin, dmax, e => e.c !== 3, adelanteDe); if (!L) continue;
+    const side = Math.random() < 0.5 ? 1 : -1, off = ASF[L.e.c] + rand(0.9, Math.max(1, MEDIO[L.e.c] - ASF[L.e.c] - 0.6));
+    const x = L.x - L.tz * off * side, z = L.z + L.tx * off * side;
+    if (!tieneVereda(x, z) || solidAt(x, z)) continue;
+    return { x, z, tx: L.tx, tz: L.tz, side };
+  }
+  return null;
+}
 function spawnPed() {
-  const [fx, fz] = DIRS[player.h];
-  const busy = curZone === 'paseo';
-  const same = Math.random() < (busy ? 0.4 : 0.2);
-  const plat = lateralOf(player.x, player.z, fx);
-  const lat = Math.random() < 0.45 && Math.abs(plat) > 5.5 ? clamp(plat + rand(-0.4, 0.4), -9.2, 9.2) : (Math.random() < 0.5 ? -1 : 1) * rand(6.3, 9.0);
-  const pos = streetSpot(same ? rand(busy ? 8 : 14, 24) : rand(busy ? 22 : 32, 46), lat);
-  if (pos.z > COAST + 9 || onHwy(pos.x, pos.z)) return;
-  const tourist = districtOf(Math.floor(pos.x / P), Math.floor(pos.z / P)) === 'paseo';
+  const busy = curZone === 'paseo', pos = lugarVereda(busy ? 10 : 18, busy ? 40 : 48, player.aim); if (!pos) return;
+  const sg = Math.random() < 0.5 ? 1 : -1, dx = pos.tx * sg, dz = pos.tz * sg;
+  const tourist = zoneAt(pos.x, pos.z) === 'paseo';
   const tough = Math.random() < Math.min(0.35, 0.08 + elapsed * 0.003) * (tourist ? 0.4 : 1);
   const rig = randomRig(tough, tourist);
   const weapon = tough && Math.random() < 0.45 ? pick(['bate', 'cano', 'palo']) : null;
   if (weapon) hold(rig, weapon);
-  const first = makePed(rig, pos.x, pos.z, same ? fx : -fx, same ? fz : -fz, { weapon, speed: same ? rand(0.7, 1.0) : 0, lane: lat });
+  const first = makePed(rig, pos.x, pos.z, dx, dz, { weapon });
   if (!tough && Math.random() < 0.32) {   // friends, couples and families walk side by side
-    const n = Math.random() < 0.6 ? 1 : 2, dir = (Math.abs(lat) > 7.4 ? -1 : 1) * Math.sign(lat);
-    for (let k = 1; k <= n; k++) { const l2 = lat + dir * 0.85 * k, d = l2 - lat; makePed(randomRig(false, tourist), pos.x + (fx === 0 ? d : 0), pos.z + (fx === 0 ? 0 : d), first.dx, first.dz, { speed: first.speed, lane: l2 }).mood = first.mood; }
+    const n = Math.random() < 0.6 ? 1 : 2;
+    for (let k = 1; k <= n; k++) {
+      const q = makePed(randomRig(false, tourist), pos.x + pos.tz * 0.85 * k, pos.z - pos.tx * 0.85 * k, dx, dz, { speed: first.speed });
+      q.mood = first.mood; q.side = first.side; q.off = clamp(first.off + (first.off > 2 ? -0.85 : 0.85) * k, 0.6, 5);
+    }
   }
 }
 function spawnChat() {   // two or three people standing around talking
-  const [fx, fz] = DIRS[player.h], c = streetSpot(rand(22, 46), (Math.random() < 0.5 ? -1 : 1) * 8.2), n = Math.random() < 0.5 ? 2 : 3;
-  if (c.z > COAST + 9 || onHwy(c.x, c.z)) return;
-  const tourist = districtOf(Math.floor(c.x / P), Math.floor(c.z / P)) === 'paseo', a0 = rand(0, 6.28);
+  const c = lugarVereda(22, 46, player.aim), n = Math.random() < 0.5 ? 2 : 3; if (!c) return;
+  const tourist = zoneAt(c.x, c.z) === 'paseo', a0 = rand(0, 6.28);
   for (let k = 0; k < n; k++) {
-    const a = a0 + k / n * PI * 2, x = c.x + Math.cos(a) * 0.75, z = c.z + Math.sin(a) * 0.75, p = makePed(randomRig(false, tourist), x, z, fx, fz);
+    const a = a0 + k / n * PI * 2, x = c.x + Math.cos(a) * 0.75, z = c.z + Math.sin(a) * 0.75, p = makePed(randomRig(false, tourist), x, z, c.tx, c.tz);
     p.post = { x, z, face: faceTo(-Math.cos(a), -Math.sin(a)) }; p.chat = true; p.tried = true; p.rig.g.rotation.y = p.post.face;
   }
 }
@@ -2510,8 +2600,7 @@ function dropPickup(key, x, z) {
 function spawnPickup() {
   const r = Math.random(), m = Math.random();   // now and then a pistol or a machine gun instead of a stick
   const key = r < 0.14 ? 'pistola' : r < 0.2 ? 'metralleta' : m < 0.32 ? 'palo' : m < 0.52 ? 'sarten' : m < 0.76 ? 'bate' : m < 0.9 ? 'cano' : m < 0.97 ? 'espada' : 'katana';
-  const pos = streetSpot(rand(16, 30), rand(-9, 9));
-  if (pos.z > SHORE - 2) return;
+  const pos = lugarVereda(16, 32, player.aim); if (!pos) return;
   dropPickup(key, pos.x, pos.z);
 }
 
@@ -2706,7 +2795,7 @@ function unseat(c) {
 }
 function driverOut(c, angry) {
   const out = unseat(c);
-  const [dx, dz] = DIRS[cardinal(c.th)], s = Math.random() < 0.5 ? 1 : -1;
+  const [dx, dz] = carF(c), s = Math.random() < 0.5 ? 1 : -1;
   const p = makePed(out.rig, out.x, out.z, dx * s, dz * s);
   if (angry) {
     p.angry = true; p.cd = 0.8; p.speed *= 1.2;
@@ -2716,51 +2805,73 @@ function driverOut(c, angry) {
   c.state = 'parked'; sfx('door');
   return p;
 }
+/* Carril de cada clase de calle (metros a la derecha del eje): calles y pasajes de mano y contramano, avenidas
+   y el bulevar con dos carriles por mano, rutas angostas. */
+const CARRIL = [[2.25], [1.7, 4.8], [3.2, 7.8], [1.9], [], [], [], [1.7]];
+const carrilDe = (c, e) => { const L = CARRIL[e.c]; return L[Math.min(L.length - 1, c.carril || 0)]; };
 function spawnCar(parked) {
   if (!parked && !settings.traffic) return;
-  const [fx, fz] = DIRS[player.h];
-  const own = Math.random() < 0.7;
-  const alongZ = own ? fx === 0 : fx !== 0;
-  const center = alongZ ? nearest(player.x + (own ? 0 : fx * 30)) : nearest(player.z + (own ? 0 : fz * 30));
-  const along = (alongZ ? player.z : player.x) + (Math.random() < 0.5 ? -1 : 1) * rand(parked ? 20 : 45, parked ? 50 : 65);
-  const d = Math.random() < 0.5 ? 1 : -1, dx = alongZ ? 0 : d, dz = alongZ ? d : 0;
-  const off = parked ? CURB : LANE;
-  const x = alongZ ? center - dz * off : along, z = alongZ ? along : center + dx * off;
-  if (parked && (inCross(x, z) || onHwy(x, z))) return;
-  if (z > COAST + 4) return;
+  if (!parked && player.nivel && Math.random() < 0.8) return spawnAutoAU();
+  const L = lugarEnRed(parked ? 18 : 42, parked ? 50 : 66, parked ? (e => e.c !== 3 && e.c !== 2) : esCalleAuto, player.aim); if (!L) return;
+  const dir = Math.random() < 0.5 ? 1 : -1, tx = L.tx * dir, tz = L.tz * dir, carril = Math.random() < 0.5 ? 0 : 1;
+  const off = parked ? ASF[L.e.c] - 1.15 : CARRIL[L.e.c][Math.min(carril, CARRIL[L.e.c].length - 1)];
+  const x = L.x - tz * off, z = L.z + tx * off;
+  if (!enTierra(x, z) || solidAt(x, z) || (parked && !tieneVereda(x - tz * 2.5, z + tx * 2.5))) return;
   for (const o of cars) if (Math.hypot(o.x - x, o.z - z) < 8) return;
   if (zoneAt(x, z) === 'aeropuerto') return;
-  const c = makeCar(x, z, faceTo(dx, dz), parked ? 'parked' : 'drive', parked && Math.random() < 0.18 ? 'taxi' : undefined);
+  const c = makeCar(x, z, faceTo(tx, tz), parked ? 'parked' : 'drive', parked && Math.random() < 0.18 ? 'taxi' : undefined);
+  c.carril = carril; c.ruta = { e: L.e, dir, s: dir > 0 ? L.al : L.e.len - L.al, next: null };
   if (!parked) { seat(c, randomRig(Math.random() < 0.15)); c.speed = c.cruise; }
 }
-/* Each AI car picks straight / right / left for the next corner and follows a fixed-radius arc
-   that ends exactly in the right-hand lane of the new street. */
-function planTurn(c, fx, fz) {
-  const alongZ = Math.abs(fx) < 0.5, d = alongZ ? Math.sign(fz) : Math.sign(fx), a = alongZ ? c.z : c.x;
-  let a0 = nearest(a); if ((a - a0) * d > 0.5) a0 += d * P;
-  const s = (a - a0) * d, other = alongZ ? nearest(c.x) : nearest(c.z);
-  const ix = alongZ ? { s, cx: other, cz: a0 } : { s, cx: a0, cz: other };
-  if (c.turn) return ix;
-  const key = ix.cx + ',' + ix.cz + ',' + d + alongZ;
-  const coast = alongZ && d > 0 && a0 >= COAST;   // the sea is ahead: must turn
-  if (c.planKey !== key) {
-    if (s < -14 || coast) { c.planKey = key; const r = Math.random(); c.plan = coast ? (r < 0.5 ? 1 : -1) : r < 0.5 ? 0 : r < 0.75 ? 1 : -1; }
-    return ix;
-  }
-  if (c.plan === 1 && s >= -(LANE + 3)) startTurn(c, -1, 3);
-  else if (c.plan === -1 && s >= -(6.5 - LANE)) startTurn(c, 1, 6.5);
-  return ix;
+function spawnAutoAU() {   // tránsito arriba de la autopista por la que va el jugador
+  const d0 = deckAt(player.x, player.z, player.y, 3); if (!d0 || d0.A.rulo) return;
+  const A = d0.A, S = A.S, iP = S.reduce((b, q, i) => Math.hypot(q.x - player.x, q.z - player.z) < Math.hypot(S[b].x - player.x, S[b].z - player.z) ? i : b, 0);
+  const i = clamp(iP + (Math.random() < 0.6 ? 1 : -1) * Math.round(rand(12, 17)), 2, S.length - 3), dir = Math.random() < 0.5 ? 1 : -1;
+  const a = S[i], b = S[i + dir], L = Math.hypot(b.x - a.x, b.z - a.z) || 1, tx = (b.x - a.x) / L, tz = (b.z - a.z) / L, off = Math.random() < 0.5 ? 2.6 : 6.4;
+  const x = a.x - tz * off, z = a.z + tx * off;
+  for (const o of cars) if (Math.hypot(o.x - x, o.z - z) < 10) return;
+  const c = makeCar(x, z, faceTo(tx, tz), 'drive'); c.nivel = 1; c.y = a.y; c.au = { A, i, dir, off };
+  seat(c, randomRig(Math.random() < 0.15)); c.speed = c.cruise * 1.6;
 }
-function startTurn(c, sign, R) {
-  const base = -cardinal(c.th) * PI / 2;
-  c.th = base; c.turn = { sign, R, rem: PI / 2, to: base + sign * PI / 2 }; c.plan = 0; c.dodge = 0; c.dodgeT = 0;
+/* La manejada de la computadora: apunta a un punto unos metros adelante sobre su carril (así dobla solo en
+   las esquinas), baja la velocidad antes de doblar y cede el paso si alguien está cruzando la esquina.
+   Devuelve { ritmo, max, espera, enCordon }. */
+function conducirIA(c, dt) {
+  const [fx, fz] = carF(c), out = { ritmo: 1, max: 99, espera: false, enCordon: false };
+  let gx, gz, look = 5 + Math.max(0, c.speed) * 0.55;
+  if (c.au) {   // en la autopista: sigue las muestras del tablero
+    const { A, dir } = c.au, S = A.S;
+    while (c.au.i + dir >= 0 && c.au.i + dir < S.length && ((S[c.au.i + dir].x - c.x) * fx + (S[c.au.i + dir].z - c.z) * fz) < 0) c.au.i += dir;
+    const j = c.au.i + dir * Math.ceil(look / 4);
+    if (j < 1 || j >= S.length - 1) { c.fuera = Math.hypot(c.x - player.x, c.z - player.z) > 40; out.max = 0; return out; }   // llegó a la punta
+    const a = S[j], b = S[j + dir], L = Math.hypot(b.x - a.x, b.z - a.z) || 1, tx = (b.x - a.x) / L, tz = (b.z - a.z) / L;
+    gx = a.x - tz * (c.au.off + c.dodge); gz = a.z + tx * (c.au.off + c.dodge); out.ritmo = 1.6;
+  } else {
+    if (!c.ruta || avanzarRuta(c.ruta, c.x, c.z, esCalleAuto) > 14) c.ruta = rutaDesde(c.x, c.z, fx, fz, esCalleAuto);
+    const R = c.ruta; if (!R) { out.max = 0; return out; }
+    const q = adelante(R, look, esCalleAuto), off = (c.state === 'pull' ? ASF[R.e.c] - 1.15 : carrilDe(c, R.e)) + c.dodge;
+    gx = q.x - q.tz * off; gz = q.z + q.tx * off;
+    const resta = R.e.len - R.s, n = NODOS[R.dir > 0 ? R.e.b : R.e.a];
+    if (resta < 24 && n.aristas.length > 2) {   // llegando a una esquina
+      const t = ptArista(R.e, R.dir, R.e.len), nx = R.next || (adelante(R, resta + 1, esCalleAuto), R.next);
+      if (nx) { const p2 = ptArista(nx.e, nx.dir, 4), ox = p2.x - n.x, oz = p2.z - n.z, Lo = Math.hypot(ox, oz) || 1, cos = (ox * t.tx + oz * t.tz) / Lo; if (cos < 0.8) out.max = cos < 0.3 ? 4.5 : 6.5; }
+      if (resta < n.r + 9 && resta > n.r - 1) for (const o of cars) {   // ceder el paso a quien ya está cruzando
+        if (o === c || (o.nivel || 0) !== (c.nivel || 0) || Math.hypot(o.x - n.x, o.z - n.z) > n.r + 1.5 || Math.abs(o.speed) < 0.5) continue;
+        const [ofx, ofz] = carF(o); if (Math.abs(ofx * fx + ofz * fz) < 0.75) { out.espera = true; break; }
+      }
+    }
+    if (c.state === 'pull') { const lat = (c.x - q.x) * -q.tz + (c.z - q.z) * q.tx; out.enCordon = Math.abs(lat - (ASF[R.e.c] - 1.15)) < 0.4; }
+  }
+  const want = Math.atan2(-(gx - c.x), -(gz - c.z)), d = angDiff(c.th, want), st = clamp(d, -2.4 * dt, 2.4 * dt) * clamp(Math.abs(c.speed) / 3, 0.2, 1);
+  c.th += st; c.latV = st / Math.max(dt, 1e-3) * Math.max(0, c.speed) * 0.1;
+  if (Math.abs(d) > 0.5) out.max = Math.min(out.max, 4);
+  return out;
 }
 function setupCars() {
-  if (ETAPA_MAPA < 4) {   // por ahora, solo un auto estacionado junto al cordón para probar el manejo
+  if (ETAPA_MAPA < 4) {   // solo un auto estacionado junto al cordón para probar el manejo
     const s = INICIO.at(INICIO.r0 + 22, ASF[INICIO.e.c] - 1.3); makeCar(s.x, s.z, INICIO.yaw, 'parked'); return;
   }
-  const [rx, rz] = right(), s = streetSpot(15, (rx || rz) * CURB);
-  makeCar(s.x, s.z, faceTo(...DIRS[player.h]), 'parked');
+  const s = INICIO.at(INICIO.r0 + 22, ASF[INICIO.e.c] - 1.15); makeCar(s.x, s.z, INICIO.yaw, 'parked');
   spawnCar(false); spawnCar(false);
 }
 function enterCar(c) {
@@ -2811,33 +2922,10 @@ function updateCars(dt) {
       c.honkT -= dt; c.force -= dt; c.rev -= dt; c.dodgeT -= dt;
       if (c.dodgeT <= 0) c.dodge = 0;
       let target = c.state === 'drive' ? c.cruise : c.state === 'pull' ? 3 : 0, waiting = false;
-      const alongZ = Math.abs(fx) < 0.5;
-      if (c.state === 'drive' && (alongZ ? hwyX(c.x, c.z) : hwyZ(c.z))) target *= 1.7;   // motorway pace
-      if (c.state === 'drive' && c.driver) {
-        const ix = planTurn(c, fx, fz);
-        if (c.plan && ix.s > -18) target = Math.min(target, c.plan === 1 ? 4.5 : 6);
-        if (!c.turn && ix.s > -12 && ix.s < -5) {
-          // give way to cars already crossing or turning in the intersection
-          for (const o of cars) {
-            if (o === c || Math.abs(o.x - ix.cx) > 9.5 || Math.abs(o.z - ix.cz) > 9.5) continue;
-            const [ofx, ofz] = carF(o);
-            if ((o.turn || Math.abs(ofx * fx + ofz * fz) < 0.7) && (Math.abs(o.speed) > 0.5 || o.turn)) { target = 0; waiting = true; break; }
-          }
-        }
-      }
-      if (c.turn) {
-        target = Math.min(target, c.turn.R < 4 ? 4.5 : 6);
-        const st = Math.min(Math.max(0, c.speed) / c.turn.R * dt, c.turn.rem);
-        c.th += c.turn.sign * st; c.turn.rem -= st;
-        if (c.turn.rem <= 1e-4) { c.th = c.turn.to; c.turn = null; }
-      } else {
-        c.th = angLerp(c.th, -cardinal(c.th) * PI / 2, Math.min(1, dt * 2.5));   // straighten up after a knock
-        const off = (c.state === 'pull' ? CURB : LANE) + c.dodge;
-        const lat = alongZ ? c.x - nearest(c.x) : c.z - nearest(c.z), want = (alongZ ? rx : rz) * off;
-        const adj = clamp(want - lat, -1, 1) * 2.5 * dt;
-        if (alongZ) c.x += adj; else c.z += adj;
-        c.latV = (alongZ ? adj * rx : adj * rz) / Math.max(dt, 1e-3);
-        if (c.state === 'pull' && Math.abs(want - lat) < 0.25) target = 0;
+      if (c.state === 'drive' || c.state === 'pull') {
+        const w = conducirIA(c, dt);   // sigue su recorrido: dobla en las esquinas y cede el paso
+        target = Math.min(target * w.ritmo, w.max); if (w.espera) { target = 0; waiting = true; }
+        if (c.state === 'pull' && w.enCordon) target = 0;
       }
       if (c.state === 'drive' || c.state === 'pull') {
         for (const o of cars) {
@@ -2871,7 +2959,7 @@ function updateCars(dt) {
       if (c.rev > 0) target = -2.5;
       else if (c.forceNext) { c.forceNext = false; c.force = 1.8; }
       c.speed = c.speed < target ? Math.min(target, c.speed + (c.speed < 0 ? 8 : c.spec.acc * 0.75) * dt) : Math.max(target, c.speed - 12 * dt);
-      if (c.state === 'drive' && c.driver && !c.turn && !inCross(c.x, c.z) && Math.random() < dt * 0.02) c.state = 'pull';
+      if (c.state === 'drive' && c.driver && !c.au && c.ruta && c.ruta.s > NODOS[c.ruta.dir > 0 ? c.ruta.e.a : c.ruta.e.b].r + 6 && c.ruta.s < c.ruta.e.len - 20 && Math.random() < dt * 0.02) c.state = 'pull';
       if (c.state === 'pull' && target === 0 && c.speed < 0.15) driverOut(c, false);
       if (c.state === 'halt') { c.t -= dt; if (c.t <= 0) { if (c.angryExit && c.driver) driverOut(c, true); else c.state = c.driver ? 'drive' : 'parked'; c.angryExit = false; } }
       if (c.state === 'start') { c.t -= dt; if (c.t <= 0) c.state = 'drive'; }
@@ -2939,7 +3027,7 @@ function updateCars(dt) {
     } else rollT = clamp(-c.w * 0.05, -0.08, 0.08);
     c.roll += (rollT - c.roll) * Math.min(1, dt * 6);
     c.g.position.set(c.x, (hf + hb) / 2, c.z); c.g.rotation.set(Math.atan2(hf - hb, 2 * c.hl), c.th + c.vis, c.roll);
-    if (c.state !== 'player' && c.state !== 'race' && c.state !== 'escort' && c.state !== 'police' && (Math.hypot(c.x - player.x, c.z - player.z) > 100 || (c.driver && c.z > COAST + 9))) { scene.remove(c.g); cars.splice(i, 1); }
+    if (c.state !== 'player' && c.state !== 'race' && c.state !== 'escort' && c.state !== 'police' && (Math.hypot(c.x - player.x, c.z - player.z) > 100 || !enTierra(c.x, c.z) || c.fuera)) { scene.remove(c.g); cars.splice(i, 1); }
   }
   for (let a = 0; a < cars.length; a++) for (let b = a + 1; b < cars.length; b++) collideCars(cars[a], cars[b]);
 }
@@ -3727,7 +3815,7 @@ function updateChallenge(dt) {
 function declineRace() {
   document.getElementById('dialog').hidden = true; state = 'play';
   const c = challenge && challenge.car; challenge = null; chalT = rand(50, 90);
-  if (c) { c.th = -cardinal(c.th) * PI / 2; c.state = 'drive'; c.speed = 6; pop('¡GALLINA!', c.x, 2.8, c.z, 'talk'); }
+  if (c) { c.ruta = null; c.state = 'drive'; c.speed = 6; pop('¡GALLINA!', c.x, 2.8, c.z, 'talk'); }
 }
 function acceptRace() {
   document.getElementById('dialog').hidden = true;
@@ -3759,7 +3847,7 @@ function setupRace(rival, bet) {
 function raceDrive(c, dt) {
   const pc = player.car;
   if (c.state === 'escort') {
-    if (!pc) { c.state = 'drive'; c.th = -cardinal(c.th) * PI / 2; return; }
+    if (!pc) { c.state = 'drive'; c.ruta = null; return; }
     const [fx, fz] = carF(pc);
     c.th = pc.th; c.speed = pc.speed;
     c.x = pc.x + fz * 3.4 + fx * 0.6 - fx * c.speed * (1 / 60); c.z = pc.z - fx * 3.4 + fz * 0.6 - fz * c.speed * (1 / 60);
@@ -3825,7 +3913,7 @@ function endRace(win, why) {
 function closeRace() {
   document.getElementById('raceRes').hidden = true; state = 'play';
   if (finishG) { scene.remove(finishG); finishG = null; }
-  if (race && race.rival && cars.indexOf(race.rival) >= 0) { const c = race.rival; c.th = -cardinal(c.th) * PI / 2; c.state = c.driver ? 'drive' : 'parked'; }
+  if (race && race.rival && cars.indexOf(race.rival) >= 0) { const c = race.rival; c.ruta = null; c.state = c.driver ? 'drive' : 'parked'; }
   race = null; chalT = rand(50, 90);
 }
 function resetRace() {
@@ -3980,7 +4068,7 @@ function policeTarget(c) {
   return player;
 }
 function policeDrive(c, dt) {
-  if (wanted.level === 0 || !c.driver) { c.th = -cardinal(c.th) * PI / 2; c.state = c.driver ? 'drive' : 'parked'; return; }
+  if (wanted.level === 0 || !c.driver) { c.ruta = null; c.state = c.driver ? 'drive' : 'parked'; return; }
   const dist = Math.hypot(player.x - c.x, player.z - c.z), onFoot = !player.car && !player.air;
   let target;
   if (onFoot && dist < 20) {   // close to a runner on foot: stop and get out after them
@@ -5324,7 +5412,7 @@ function applySettings() {
   }
   if (!settings.heli) removeHeli();
   if (!settings.gangs) { for (let i = peds.length - 1; i >= 0; i--) if (peds[i].gang) removePed(i); for (const k in GANGS) GANGS[k].aggro = 0; }
-  if (!settings.races && challenge) { const c = challenge.car; challenge = null; if (c) { c.th = -cardinal(c.th) * PI / 2; c.state = 'drive'; } }
+  if (!settings.races && challenge) { const c = challenge.car; challenge = null; if (c) { c.ruta = null; c.state = 'drive'; } }
   if (!settings.traffic) for (let i = cars.length - 1; i >= 0; i--) { const c = cars[i]; if (c.driver && ['drive', 'pull', 'halt', 'start'].includes(c.state)) { scene.remove(c.g); cars.splice(i, 1); } }
 }
 let resumeState = 'play';
@@ -5585,7 +5673,7 @@ function updatePeds(dt) {
         else {
           const [ex0, ez0] = carDoor(c), ex = ex0 - p.x, ez = ez0 - p.z, d = Math.hypot(ex, ez);
           if (d < 0.5) {
-            seat(c, r); c.th = -cardinal(c.th) * PI / 2; c.turn = null; c.dodge = 0; c.state = 'start'; c.t = 0.9;
+            seat(c, r); c.ruta = null; c.turn = null; c.dodge = 0; c.state = 'start'; c.t = 0.9;
             peds.splice(i, 1); sfx('door'); continue;
           }
           const st = Math.min(d, p.speed * 1.3 * dt); p.x += ex / d * st; p.z += ez / d * st;
@@ -5593,18 +5681,28 @@ function updatePeds(dt) {
         }
       } else {
         const chase = p.angry && !player.car && !player.air, scared = p.scared > 0 && !p.angry;
-        if (scared) { p.scared -= dt; const sg = (p.dx !== 0 ? tx : tz) > 0 ? -1 : 1; if (p.dx !== 0) p.dx = sg; else p.dz = sg; }   // run away along the street
+        if (scared) p.scared -= dt;
         let mx = p.dx, mz = p.dz;
         if (chase && dist > 0.01) { mx = tx / dist; mz = tz / dist; }
+        else {   // camina por la vereda siguiendo su recorrido; si se asusta, corre para el lado contrario al jugador
+          const R = p.ruta || (p.ruta = rutaDesde(p.x, p.z, p.dx, p.dz, esCiudad));
+          if (R) {
+            if (scared) { const t = ptArista(R.e, R.dir, R.s); if (tx * t.tx + tz * t.tz > 0) { R.dir = -R.dir; R.s = R.e.len - R.s; R.next = null; p.side = -p.side; } }
+            if (avanzarRuta(R, p.x, p.z, esCiudad) > 25) p.ruta = null;
+            else {
+              const q = adelante(R, 1.8, esCiudad), lane = p.side * (ASF[R.e.c] + Math.min(p.off, MEDIO[R.e.c] - ASF[R.e.c] - 0.4));
+              const gx = q.x - q.tz * lane - p.x, gz = q.z + q.tx * lane - p.z, gl = Math.hypot(gx, gz);
+              if (gl > 0.05) { mx = gx / gl; mz = gz / gl; p.dx = mx; p.dz = mz; }
+            }
+          }
+        }
         const ah = tx * mx + tz * mz, sd = tx * -mz + tz * mx;
         let step = p.speed * (scared ? 2.7 : 1) * dt, contact = false;
         if (!player.car && !player.air && ah > 0.25 && Math.abs(sd) < 0.75 && ah - step < 1.0) { step = Math.max(0, Math.min(step, ah - 1.0)); contact = true; }
         if (chase && dist < 1.3) { step = 0; contact = true; }
         p.x += mx * step; p.z += mz * step;
         if (!chase) {
-          const lat = lateralOf(p.x, p.z, p.dx), adj = clamp(p.lane - lat, -1, 1) * 1.6 * dt;
-          if (p.dx === 0) p.x += adj; else p.z += adj;
-          if (!p.tried && !p.angry) for (const c of cars) if (c.state === 'parked' && !c.driver && !c.wreck && c.z < COAST + HALF && Math.hypot(c.x - p.x, c.z - p.z) < 4.5) {
+          if (!p.tried && !p.angry) for (const c of cars) if (c.state === 'parked' && !c.driver && !c.wreck && !c.hosp && !c.police && Math.hypot(c.x - p.x, c.z - p.z) < 4.5) {
             p.tried = true; if (Math.random() < 0.4) { p.state = 'toCar'; p.car = c; } break;
           }
         }
