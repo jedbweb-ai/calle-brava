@@ -241,6 +241,7 @@ body.menu-open #hud,body.menu-open #controls,body.menu-open #hint,body.menu-open
       <span class="chip m">◀ ▶</span><span>Moverte de costado. Dos toques rápidos en ◀ giran a la izquierda; dos en ▶, a la derecha</span>
       <span class="chip m">MIRA</span><span>Arrastrá el dedo o el mouse sobre la pantalla para girar la cámara: el personaje gira con ella y la mira del centro marca adónde van los tiros y los golpes. Manejando, arrastrar solo mira a los costados</span>
       <span class="chip p">PIÑA</span><span>Golpe rápido. Con un arma en la mano, la usás</span>
+      <span class="chip m">DISPARAR</span><span>Con pistola o metralleta. Manejando también: sacás el arma por la ventana y tirás hacia la mira; arrastrá la pantalla para apuntar a los costados o para atrás</span>
       <span class="chip k">PATADA</span><span>Más alcance, más daño</span>
       <span class="chip c">$</span><span>Cada desmayado larga plata. Gastala en las armerías (el rombo amarillo): bates, espadas, pistolas, metralletas. En la calle también aparecen pistolas y metralletas tiradas: si ya tenés una, te suman balas</span>
       <span class="chip p">CHOQUES</span><span>Los autos se rompen con choques y tiros. Primero largan humo y después explotan, lastimando a todo lo que está cerca. Fijate el DAÑO arriba mientras manejás</span>
@@ -1962,7 +1963,7 @@ function updateLook(dt) {
   const onFoot = !player.car && !player.air && !player.down && active();
   lookDrop = false;
   if (onFoot) { camLook *= Math.exp(-10 * dt); return; }
-  if (lookId === null && lookIdle > 1 && (!onFoot || player.walking)) camLook *= Math.exp(-3 * dt);   // drift back behind you once you move on
+  if (lookId === null && lookIdle > (player.car && player.gun ? 2.5 : 1) && (!onFoot || player.walking)) camLook *= Math.exp(-3 * dt);   // drift back behind you once you move on
   if (!active()) camLook *= Math.exp(-3 * dt);
 }
 
@@ -3073,7 +3074,7 @@ function makeGun(key) {
 }
 const bS = document.getElementById('bS'), ammoEl = document.getElementById('ammo'), sLab = document.getElementById('sLab');
 function updateShootBtn() {
-  bS.hidden = !player.gun || !!player.car || !!player.air;
+  bS.hidden = !player.gun || !!player.air;
   const sl = room && !room.heist ? 'APUNTAR' : 'DISPARAR'; if (sLab.textContent !== sl) sLab.textContent = sl;
   if (player.gun) ammoEl.textContent = player.gun.reload > 0 ? '···' : player.gun.ammo + '/' + player.gun.reserve;
 }
@@ -3084,9 +3085,10 @@ function equipGun(key) {
   updateShootBtn();
 }
 function dropGun() { const r = player.rig; if (r.gunMesh) { r.armL.remove(r.gunMesh); r.gunMesh = null; } player.gun = null; updateShootBtn(); }
+const shotDir = () => { if (!player.car) return fwd(); const v = camYaw + camLook; return [-Math.sin(v), -Math.cos(v)]; };
 function tryShoot() {
   if (state === 'inside') { roomShoot(); return; }
-  if (state !== 'play' || player.car || player.down || !player.gun || shootCd > 0 || player.gun.reload > 0) return;
+  if (state !== 'play' || player.down || !player.gun || shootCd > 0 || player.gun.reload > 0) return;
   const G = GUNS[player.gun.key];
   if (player.gun.ammo <= 0) {
     if (player.gun.reserve > 0) startReload();
@@ -3094,8 +3096,9 @@ function tryShoot() {
     return;
   }
   player.gun.ammo--; shootCd = G.rate; shootPose = 0.3; addHeat(0.1); alarm(player.x, player.z, 28, true);
-  const [fx, fz] = fwd(), [rx, rz] = right();
-  const x = player.x + fx * 0.9 - rx * 0.37, z = player.z + fz * 0.9 - rz * 0.37;
+  const [fx, fz] = shotDir(), [rx, rz] = [-fz, fx], c = player.car;   // from a car the gun comes out of the window, towards where the camera looks
+  if (c) lookIdle = 0;
+  const x = c ? c.x + fx * (c.hw + 0.9) : player.x + fx * 0.9 - rx * 0.37, z = c ? c.z + fz * (c.hw + 0.9) : player.z + fz * 0.9 - rz * 0.37;
   const m = new THREE.Mesh(bulletGeo, bulletMat); m.position.set(x, 1.5 + hgt(x, z), z); m.rotation.y = faceTo(fx, fz); scene.add(m);
   bullets.push({ m, x, z, fx, fz, life: 1.2, dmg: player.gun.key === 'metralleta' ? 7 : 12 });
   const fl = new THREE.Mesh(debrisGeo, flashMat); fl.scale.setScalar(2.2); fl.position.copy(m.position); scene.add(fl); setTimeout(() => scene.remove(fl), 50);
@@ -3150,7 +3153,7 @@ function updateBullets(dt) {
 }
 bS.addEventListener('pointerdown', e => { e.preventDefault(); initAudio(); bS.classList.add('down'); shootHeld = true; tryShoot(); });
 ['pointerup', 'pointercancel', 'pointerleave'].forEach(ev => bS.addEventListener(ev, () => { bS.classList.remove('down'); shootHeld = false; }));
-window.addEventListener('keydown', e => { const k = e.key.toLowerCase(); if ((k === 'l' || k === 'c') && !e.repeat) { shootHeld = true; tryShoot(); } if (k === 'r' && active() && !player.car) startReload(); });
+window.addEventListener('keydown', e => { const k = e.key.toLowerCase(); if ((k === 'l' || k === 'c') && !e.repeat) { shootHeld = true; tryShoot(); } if (k === 'r' && active()) startReload(); });
 window.addEventListener('keyup', e => { const k = e.key.toLowerCase(); if (k === 'l' || k === 'c') shootHeld = false; });
 
 /* ---------- street races ("picadas") ---------- */
@@ -4710,7 +4713,7 @@ function startGame() {
   while (pickups.length) scene.remove(pickups.pop().g);
   kos = 0; koEl.textContent = 0; elapsed = 0; spawnT = 2.5; itemT = 4;
   player.hp = player.maxHp; player.invuln = 0; player.attack = null; player.down = 0; player.kickBonus = 0;
-  player.money = 0; player.earned = 0; addMoney(0);
+  player.money = 500; player.earned = 0; addMoney(0);   // you start with $500 in your pocket
   player.rig.body.rotation.set(0, 0, 0); player.rig.body.position.y = 0;
   equip(null); dropGun(); resetJob(); resetRace(); resetWorldThreats(); drawHearts();
   menuEl.hidden = true; overEl.hidden = true; shopOv.hidden = true; state = 'play';
@@ -4781,6 +4784,9 @@ function updatePlayer(dt) {
   }
   if (player.car) {
     setTurnMode(false); setCtx(null);
+    { const c = player.car, r = player.rig, aimNow = player.gun && (shootPose > 0 || shootHeld);
+      if (aimNow) { const rel = angDiff(c.th, camYaw + camLook); r.g.rotation.y = rel; r.armL.rotation.set(PI / 2, 0, 0); }
+      else if (r.g.rotation.y !== 0) { r.g.rotation.y = 0; const k = c.spec.moto ? 1.25 : 1.1; r.armL.rotation.set(k, 0, c.spec.moto ? 0.12 : 0); } }
     const c = player.car, t = carHintT > 0 ? '▲ ACELERA · ◀ ▶ VOLANTE · PIÑA FRENA' : c.spec.name.toUpperCase() + ' · ' + Math.round(Math.abs(c.speed) * 8) + ' KM/H' + (c.hp < c.maxHp ? ' · DAÑO ' + Math.round((1 - c.hp / c.maxHp) * 100) + '%' : '');
     if (hintEl.textContent !== t) hintEl.textContent = t;
     hintEl.hidden = false; return;
@@ -4979,10 +4985,10 @@ function updateWorld(dt) {
 
 const aimEl = document.getElementById('aim'), aimV = new THREE.Vector3();
 function drawAim() {   // the crosshair sits where a shot (or a swing) straight ahead would land
-  const show = onFootNow() && !player.down;
+  const show = (onFootNow() || (player.car && player.gun && state === 'play')) && !player.down;
   if (aimEl.hidden !== !show) aimEl.hidden = !show;
   if (!show) return;
-  const [fx, fz] = fwd(), d = room ? 3.5 : 14, x = (room ? room.px : player.x) + fx * d, z = (room ? room.pz : player.z) + fz * d;
+  const [fx, fz] = shotDir(), d = room ? 3.5 : 14, x = (room ? room.px : player.x) + fx * d, z = (room ? room.pz : player.z) + fz * d;
   aimV.set(x, 1.5 + (room ? 0 : hgt(x, z)), z).project(camera);
   aimEl.style.left = ((aimV.x + 1) / 2 * 100) + '%'; aimEl.style.top = ((1 - aimV.y) / 2 * 100) + '%';
   aimEl.classList.toggle('gun', !!player.gun);

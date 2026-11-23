@@ -39,7 +39,9 @@ aeropuerto/aviones → **negocios y robos** (`BIZ`, `bizOf`, `buildRoom`, `enter
 - **Controles a pie (estilo GTA):** la cámara manda. Arrastrar gira `player.aim` (continuo); se camina hacia donde mira la cámara.
   ▲ toggle caminar, ▼ caminar atrás mientras se mantiene (en auto: freno/marcha atrás), ◀ ▶ de costado (6,3 m/s), doble toque gira 90° alineado a la calle.
   `player.h` es solo la dirección cardinal derivada (la usan spawns y lógica de calles). Mira `#aim` = punto a 14 m al frente; tiros y golpes van ahí.
-  En auto/avión arrastrar es mirada libre (`camLook`) que vuelve sola.
+  En auto/avión arrastrar es mirada libre (`camLook`) que vuelve sola (con arma de fuego tarda 2,5 s en volver).
+- **Disparar desde el auto:** con pistola o metralleta, el botón DISPARAR y la mira siguen en el auto; el tiro sale por la ventana hacia `camYaw + camLook` (`shotDir`), el personaje gira en el asiento y saca el brazo. Los tiros propios no dañan el auto propio.
+- **Plata inicial:** se arranca cada partida con $500 (`startGame`; `player.earned` arranca en 0).
 - **Negocios robables:** kioscos, almacenes, farmacias, joyerías, casas de cambio (fachadas por `bizOf`, deterministas), minimercado de las nafta,
   supermercados y **3 bancos fijos**: chico `(-1,-1)` centro, mediano `(5,2)` paseo, grande `(6,-5)` microcentro.
   Interior = escena Three aparte (`room.scene`, `state === 'inside'`); el mundo de afuera se congela.
