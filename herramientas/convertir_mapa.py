@@ -501,6 +501,10 @@ def main():
         'piletas': polys('#4fc3e8'),
         'estaciones': [[M(*q) for q in p] for p in con_fill(svg, '#8f6f5a')],
         'arboles': [M(float(x), float(y)) for x, y in re.findall(r'<circle cx="([\d.]+)" cy="([\d.]+)" r="[\d.]+"/>', svg)],
+        'hangares': polys('#9aa0a6'),
+        'muelle': polys('#9b7a52'),
+        'gruas': [[M(*q) for q in p] for p in (puntos(m.group(1)) for m in re.finditer(r'<path d="([^"]*)" stroke="#e3a21a"', svg))],
+        'contenedores': [[*M(float(x), float(y)), round(float(w) * ESCALA, 1), round(float(h) * ESCALA, 1), c] for x, y, w, h, c in re.findall(r'<rect x="([\d.]+)" y="([\d.]+)" width="([\d.]+)" height="([\d.]+)"[^>]*fill="(#3b82c4|#d9534f|#5cb85c|#8e6fb3|#f0ad4e)"', svg)],
     }
     nombres = json.load(open(os.path.join(MAPA, 'nombres.json')))
     for n in nombres:
