@@ -61,7 +61,7 @@ function draw() {
   ctx.strokeStyle = '#00e5ff'; for (const p of D.lagos) { poly(p); ctx.closePath(); ctx.stroke(); }
   ctx.strokeStyle = '#ffe066'; for (const p of D.playas) { poly(p); ctx.closePath(); ctx.stroke(); }
   if (on('calles')) for (const e of D.aristas) {
-    poly(e[3], true); ctx.strokeStyle = COL[e[2]]; ctx.lineWidth = q.get('thin') ? 2 : Math.max(1.5, [20, 26, 32, 12][e[2]] * s); if (q.get('thin')) ctx.strokeStyle = ['#000', '#e00', '#a0a', '#080'][e[2]]; ctx.globalAlpha = 1; ctx.stroke(); ctx.globalAlpha = 1;
+    poly(e[3], true); ctx.strokeStyle = COL[e[2]]; ctx.lineWidth = q.get('thin') ? 2 : Math.max(1.5, [18, 22, 32, 12, 0, 0, 0, 13][e[2]] * s); if (q.get('thin')) ctx.strokeStyle = ['#000', '#e00', '#a0a', '#080'][e[2]]; ctx.globalAlpha = 1; ctx.stroke(); ctx.globalAlpha = 1;
   }  if (on('manz')) for (const m of D.plazoletas) { poly(m, true); ctx.closePath(); ctx.fillStyle = '#9c9'; ctx.fill(); }
   if (on('manz')) D.manzanas.forEach((m, k) => { poly(m.l, true); ctx.closePath(); ctx.fillStyle = on('zon') ? ZCOL[m.z] || '#3c3' : `hsla(${(k * 47) % 360},60%,60%,0.8)`; ctx.fill(); });
   if (on('det')) {

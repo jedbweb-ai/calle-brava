@@ -25,8 +25,8 @@ ESCALA = 0.55
 ORIGEN = (2090.0, 2700.0)
 
 # clases de camino (se guardan como número)
-CALLE, AVENIDA, BULEVAR, RURAL, AUTOPISTA, RULO, VIA = range(7)
-NOMBRE_CLASE = ['calle', 'avenida', 'bulevar', 'rural', 'autopista', 'rulo', 'via']
+CALLE, AVENIDA, BULEVAR, RURAL, AUTOPISTA, RULO, VIA, PASAJE = range(8)
+NOMBRE_CLASE = ['calle', 'avenida', 'bulevar', 'rural', 'autopista', 'rulo', 'via', 'pasaje']
 
 
 def M(x, y):
@@ -63,6 +63,50 @@ def scale_geom(g, k):
     return affinity.scale(g, xfact=k, yfact=k, origin=(0, 0))
 
 
+def rect_inscripto(poly_m):
+    """Rectángulo grande adentro de un polígono (en metros), alineado con su lado más largo.
+    Devuelve [cx, cz, ux, uz, w, d]: centro, dirección del ancho (u) y medidas; el fondo va en v = (-uz, ux)."""
+    mrr = poly_m.minimum_rotated_rectangle
+    cs = list(mrr.exterior.coords)
+    lados = [(math.dist(cs[i], cs[i + 1]), cs[i], cs[i + 1]) for i in range(4)]
+    _, a, b = max(lados)
+    L = math.dist(a, b) or 1
+    ux, uz = (b[0] - a[0]) / L, (b[1] - a[1]) / L
+    vx, vz = -uz, ux
+    loc = [((x * ux + z * uz), (x * vx + z * vz)) for x, z in poly_m.exterior.coords]
+    lp = Polygon(loc)
+    R = 0.5
+    x0, z0, x1, z1 = lp.bounds
+    nx, nz = int((x1 - x0) / R) + 1, int((z1 - z0) / R) + 1
+    from shapely import prepared
+    pp = prepared.prep(lp.buffer(-0.05))
+    m = np.zeros((nz, nx), dtype=bool)
+    for j in range(nz):
+        for i in range(nx):
+            m[j, i] = pp.contains(Point(x0 + (i + 0.5) * R, z0 + (j + 0.5) * R))
+    # rectángulo máximo en la matriz (método del histograma)
+    alto = np.zeros(nx, dtype=int)
+    best = (0, 0, 0, 0, 0)
+    for j in range(nz):
+        alto = np.where(m[j], alto + 1, 0)
+        pila = []
+        for i in range(nx + 1):
+            h = alto[i] if i < nx else 0
+            ini = i
+            while pila and pila[-1][1] >= h:
+                ini, hh = pila.pop()
+                area = hh * (i - ini)
+                if area > best[0]:
+                    best = (area, ini, i, j - hh + 1, j + 1)
+            pila.append((ini, h))
+    _, i0, i1, j0, j1 = best
+    if not best[0]:
+        return None
+    lx0, lx1, lz0, lz1 = x0 + i0 * R, x0 + i1 * R, z0 + j0 * R, z0 + j1 * R
+    cu, cv = (lx0 + lx1) / 2, (lz0 + lz1) / 2
+    return [round(cu * ux + cv * vx, 2), round(cu * uz + cv * vz, 2), round(ux, 4), round(uz, 4), round(lx1 - lx0, 2), round(lz1 - lz0, 2)]
+
+
 def main():
     raw = open(os.path.join(MAPA, 'atlas_sin_textos.svg')).read()
     fondo_b64 = re.search(r'href="data:image/png;base64,([^"]*)"', raw).group(1)
@@ -85,7 +129,14 @@ def main():
     #  2) a cada línea nueva se le borra lo que cae a menos de SEP de lo ya aceptado (lo que la duplica);
     #  3) los pedazos que quedan se prolongan en su propia dirección hasta tocar la red (o, si no, al punto
     #     más cercano), así los cruces que el paso 2 cortó vuelven a quedar unidos en el mismo punto.
-    SEP, ALCANCE, MIN_PEDAZO = 34.0, 40.0, 18.0
+    SEP, ALCANCE, MIN_PEDAZO = 34.0, 60.0, 18.0
+    # dos calles paralelas a menos de SEP_PARALELA se consideran la misma (entre ellas no entraría una manzana);
+    # en el Microcentro la cuadrícula es fina a propósito y se respeta
+    SEP_PARALELA, SEP_MICRO = 54.0, 26.0
+    _etq = [n for n in json.load(open(os.path.join(MAPA, 'nombres.json'))) if n['size'] == 22 or n['t'] in ('MICROCENTRO', 'LAS LOMAS', 'ZONA PORTUARIA', 'PUERTO MADERA', 'PUEBLO ALTO')]
+    def sep_en(pt):
+        cerca = min(_etq, key=lambda n: math.hypot(n['x'] - pt.x, n['y'] - pt.y))
+        return SEP_MICRO if cerca['t'] == 'MICROCENTRO' else SEP_PARALELA
     candidatas = []
     for cl, ps in capas:
         for p in ps:
@@ -126,7 +177,7 @@ def main():
                     md, mejor = d, p
         if mejor is None:   # sin cruce en línea recta: al punto más cercano, si está cerca
             pa = Point(a)
-            lim = min(alcance, SEP + 6)
+            lim = min(alcance, SEP_PARALELA + 6)
             for ln in cerca_de(pa, lim, excluir):
                 d = ln.distance(pa)
                 if 0.05 < d < min(md, lim):
@@ -148,8 +199,9 @@ def main():
 
     def duplica(pt, ang, vecinas):
         """¿el punto está pegado a una calle aceptada que va casi en la misma dirección?"""
+        lim = sep_en(pt)
         for v in vecinas:
-            if v.distance(pt) >= SEP:
+            if v.distance(pt) >= lim:
                 continue
             dv = direccion(v, v.project(pt))
             dif = abs((ang - dv + math.pi / 2) % math.pi - math.pi / 2)
@@ -158,7 +210,7 @@ def main():
         return False
 
     for cl, ln in candidatas:
-        vecinas = cerca_de(ln, SEP)
+        vecinas = cerca_de(ln, SEP_PARALELA)
         PASO = 3.0
         n = max(2, int(ln.length / PASO) + 1)
         marcas = []
@@ -334,11 +386,21 @@ def main():
     # Cada cara del grafo es una manzana. Lo edificable es la cara menos el ancho de las calles que la
     # rodean (medio ancho en metros: calle 10, avenida 13, bulevar 16, ruta 6). Las que quedan chiquitas
     # (triángulos que dejan las diagonales) se guardan aparte como plazoletas.
-    MEDIO = {CALLE: 10, AVENIDA: 13, BULEVAR: 16, RURAL: 6}
+    # En el Microcentro la cuadrícula del atlas es mucho más fina (cuadras de ~22 m): ahí las calles comunes y
+    # las avenidas pasan a ser pasajes angostos (12 m con veredas), si no las calles se comerían las manzanas.
+    etiquetas = [n for n in json.load(open(os.path.join(MAPA, 'nombres.json'))) if n['size'] == 22 or n['t'] in ('MICROCENTRO', 'LAS LOMAS', 'ZONA PORTUARIA', 'PUERTO MADERA', 'PUEBLO ALTO')]
+    for e in aristas:
+        if e['c'] not in (CALLE, AVENIDA):
+            continue
+        mid = LineString(e['p']).interpolate(0.5, normalized=True)
+        cerca = min(etiquetas, key=lambda n: math.hypot(n['x'] - mid.x, n['y'] - mid.y))
+        if cerca['t'] == 'MICROCENTRO':
+            e['c'] = PASAJE
+    MEDIO = {CALLE: 9, AVENIDA: 11, BULEVAR: 16, RURAL: 6, PASAJE: 6.5}
     urbana = [Polygon(p) for p in sueltos(svg, 'fill="#e6e2da"')]
     red = unary_union([LineString(e['p']) for e in aristas])
     calzadas = unary_union([LineString(e['p']).buffer(MEDIO[e['c']] / ESCALA, cap_style=1, join_style=1) for e in aristas])
-    ASFALTO = {CALLE: 4.5, AVENIDA: 7.5, BULEVAR: 11, RURAL: 3.8}     # medio ancho de la calzada (sin vereda)
+    ASFALTO = {CALLE: 4.5, AVENIDA: 6.5, BULEVAR: 11, RURAL: 3.8, PASAJE: 3.4}     # medio ancho de la calzada (sin vereda)
     asfalto = unary_union([LineString(e['p']).buffer(ASFALTO[e['c']] / ESCALA, cap_style=1, join_style=1) for e in aristas])
     manzanas, plazoletas = [], []           # cada una: (vereda+lote, lote)
     for poly in polygonize(red):
@@ -486,6 +548,8 @@ def main():
     ciudad = mascara(plano_sin_lomas.buffer(-4), NS)
     suelo[ciudad > 0] = 4
     suelo[arena2] = 2
+    parques = unary_union([Polygon(p) for p in con_fill(svg, '#9fcd7c')] + [Polygon(p) for p in sueltos(svg, 'fill="#8cc06b"')]).buffer(0)
+    suelo[mascara(parques.buffer(-6), NS) > 0] = 3      # parques, bosques y la reserva: pasto, no cemento
     mar_svg = scale_geom(mar, 10)
     paso = 4000 / NS
     for j in range(NS):
@@ -511,13 +575,16 @@ def main():
             z = 'plaza'
         zonas.append(z)
 
+    from shapely import affinity
+    rects = [rect_inscripto(affinity.affine_transform(lo, [ESCALA, 0, 0, ESCALA, -ORIGEN[0] * ESCALA, -ORIGEN[1] * ESCALA])) for (ve, lo) in manzanas]
+
     datos = {
         'escala': ESCALA, 'origen': ORIGEN, 'clases': NOMBRE_CLASE,
         'nodos': [M(*n) for n in nodos],
         'aristas': [[e['a'], e['b'], e['c'], [v for q in e['p'] for v in M(*q)]] for e in aristas],
         'autopistas': lista(autopistas, AUTOPISTA) + lista(rulos, RULO),
         'vias': lista(vias, VIA),
-        'manzanas': [{'v': [v for q in list(ve.exterior.coords)[:-1] for v in M(*q)], 'l': [v for q in list(lo.exterior.coords)[:-1] for v in M(*q)], 'z': zonas[k], 'b': zona_manzana[k]} for k, (ve, lo) in enumerate(manzanas)],
+        'manzanas': [{'v': [v for q in list(ve.exterior.coords)[:-1] for v in M(*q)], 'l': [v for q in list(lo.exterior.coords)[:-1] for v in M(*q)], 'z': zonas[k], 'b': zona_manzana[k], 'r': rects[k]} for k, (ve, lo) in enumerate(manzanas)],
         'barrios': [{'n': b, 'tipo': TIPO[b], 'x': M(carteles[k]['x'], carteles[k]['y'])[0], 'z': M(carteles[k]['x'], carteles[k]['y'])[1]} for k, b in enumerate(barrios)],
         'plazoletas': [[v for q in list(p.exterior.coords)[:-1] for v in M(*q)] for p in plazoletas],
         'costa': costa, 'lagos': lagos, 'playas': playas,
