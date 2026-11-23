@@ -2003,7 +2003,8 @@ const SCREAMS = ['¡AAAH!', '¡SOCORRO!', '¡POLICÍA!', '¡CORRAN!', '¡ESTÁ L
 function alarm(x, z, rad, shot, except) {
   let said = 0;
   for (const p of peds) {
-    if (p === except || p.state === 'ko' || p.cop || p.gang || p.angry || p.scared > 0 || Math.hypot(p.x - x, p.z - z) > rad) continue;
+    if (p === except || p.state === 'ko' || p.cop || p.gang || p.angry || p.scared > 0 || p.phone > 0 || p.medic || Math.hypot(p.x - x, p.z - z) > rad) continue;
+    if (p.mood !== 'fight' && !p.tough && policeCallCd <= 0 && settings.police && Math.random() < 0.3) { policeCallCd = 12; startPhone(p, 'pol', x, z); continue; }
     if (p.mood === 'fight' && (!shot || p.tough)) { p.angry = true; p.cd = 0.6; p.speed = Math.max(p.speed, 2.2); p.post = null; if (said++ < 2) pop(pick(TAUNTS), p.x, 2.7 * p.rig.s, p.z, 'talk'); }
     else if (p.mood === 'flee' || shot) { p.scared = rand(6, 10); p.post = null; if (said++ < 2) pop(pick(SCREAMS), p.x, 2.7 * p.rig.s, p.z, 'talk'); }
   }
@@ -2346,6 +2347,10 @@ function updateCars(dt) {
       c.th -= (input.r - input.l) * c.spec.steer * dt * clamp(c.speed / 5, -1, 1);
     } else if (c.state === 'police') {
       policeDrive(c, dt);
+    } else if (c.state === 'medic') {
+      medicDrive(c, dt);
+    } else if (c.state === 'medicStop') {
+      c.speed = 0; if (c.g.userData.bar) { const on = Math.floor(elapsed * 6) % 2; c.g.userData.bar[0].visible = !!on; c.g.userData.bar[1].visible = !on; }
     } else if (c.state === 'race' || c.state === 'escort') {
       raceDrive(c, dt);
     } else if (c.state === 'parked') {
@@ -2661,6 +2666,7 @@ function resolveHit(kind) {
   sfx(W ? (W.cleave ? 'blade' : 'blunt') : kind);
   shake = Math.max(shake, kind === 'punch' ? 0.12 : 0.22);
   for (const p of targets) {
+    cancelScript(p);
     p.hp -= dmg; p.flashT = 0.12; flash(p.rig, true);
     pop(pick(W && W.cleave ? A.blade : A.words), p.x, 2.2 * p.rig.s, p.z);
     const kb = A.kb * (W ? 1 + W.dmg * 0.08 : 1);
@@ -2686,6 +2692,7 @@ function resolveHit(kind) {
   }
 }
 function knockOut(p, kb, fx, fz, award = true) {
+  cancelScript(p); p.attended = false; if (p.rig.g.visible === false) p.rig.g.visible = true;
   p.state = 'ko'; p.koT = 0; p.kbx = fx * kb; p.kbz = fz * kb;
   p.rig.g.rotation.y = faceTo(-fx, -fz);
   if (award) { kos++; koEl.textContent = kos; addHeat(p.cop ? 2.5 : 1, p.cop); }
@@ -3436,7 +3443,7 @@ function spawnPatrol() {   // one or two officers walking a beat along the pavem
   const pos = streetSpot(dist, lat), same = Math.random() < 0.35, dx = same ? fx : -fx, dz = same ? fz : -fz;
   if (pos.z > COAST + 6 || zoneAt(pos.x, pos.z) === 'aeropuerto' || onHwy(pos.x, pos.z)) return;
   makeCop(pos.x, pos.z, dx, dz, { speed: 1.15, lane: lat });
-  if (Math.random() < 0.6) { const l2 = lat - side * 1.0, p2 = streetSpot(dist, l2); makeCop(p2.x, p2.z, dx, dz, { speed: 1.15, lane: l2 }); }
+  if (Math.random() < 0.35) { const l2 = lat - side * 1.0, p2 = streetSpot(dist, l2); makeCop(p2.x, p2.z, dx, dz, { speed: 1.15, lane: l2 }); }
 }
 function manStations() {   // guards at the door and a patrol car at the kerb whenever you come near a station
   for (const s of STATIONS) {
@@ -3518,10 +3525,10 @@ function updatePolice(dt) {
   setWantedLevel();
   policeT -= dt; sirenT -= dt; blinkT += dt; patrolT -= dt;
   manStations();
-  if (patrolT <= 0) { patrolT = rand(10, 18); if (peds.filter(p => p.cop && p.state !== 'ko').length < 4) spawnPatrol(); }
+  if (patrolT <= 0) { patrolT = rand(24, 40); if (peds.filter(p => p.cop && !p.station && p.state !== 'ko').length < 2) spawnPatrol(); }   // fewer officers walking the beat
   const lv = wanted.level;
   const units = cars.filter(c => c.state === 'police').length;
-  if (lv > 0 && units < lv && policeT <= 0) { spawnPoliceCar(); policeT = 5; }
+  if (lv > 0 && units < lv && policeT <= 0) { spawnPoliceCar(); policeT = 9; }
   const blink = Math.floor(blinkT * 6) % 2;
   let near = false;
   for (const c of cars) if (c.police && c.g.userData.bar) {
@@ -4555,7 +4562,7 @@ function spawnPax() {   // the passenger waving on the kerb, or the injured pers
     p.post = { x: s.x, z: s.z, face: faceTo(s.nx, s.nz) }; p.rig.g.rotation.y = p.post.face; p.wave = true; p.tried = true; p.mood = 'calm';
     job.pax = p;
   } else {
-    const p = makePed(randomRig(false), s.x, s.z, 0.0001, 1); p.state = 'ko'; p.koT = 1; p.kbx = p.kbz = 0; p.cash = 0; p.tried = true;
+    const p = makePed(randomRig(false), s.x, s.z, 0.0001, 1); p.state = 'ko'; p.koT = 1; p.kbx = p.kbz = 0; p.cash = 0; p.tried = true; p.jobPatient = true;
     p.rig.g.rotation.y = faceTo(s.nz || 1, -s.nx); job.pax = p;
     const hx = s.x - s.nz * 1.3, hz = s.z + s.nx * 1.3, h = makePed(randomRig(false), hx, hz, 0.0001, 1);
     h.post = { x: hx, z: hz, face: faceTo(s.nx, s.nz) }; h.rig.g.rotation.y = h.post.face; h.wave = true; h.tried = true; h.mood = 'calm'; job.helper = h;
@@ -4666,6 +4673,147 @@ const ambSkin = (() => {
 document.getElementById('jobYes').addEventListener('click', () => answerJob(true));
 document.getElementById('jobNo').addEventListener('click', () => answerJob(false));
 
+/* ---------- phone calls: bystanders ring for an ambulance or the police ----------
+   A caller stops, lifts a phone to the ear and says it out loud. Ambulance calls bring an ambulance with two
+   paramedics who try to bring the knocked-out person round; police calls leave you as a suspect and send a patrol. */
+const phoneMat = mat(0x1d1b2e);
+const CALL_LINES = {
+  amb: ['¡HOLA, EMERGENCIAS? HAY UN HERIDO!', '¡MANDEN UNA AMBULANCIA, RÁPIDO!', '¡HAY UNO DESMAYADO EN LA VEREDA!', '¡SÍ, NO SE MUEVE! ¡VENGAN!'],
+  pol: ['¡POLICÍA! ¡HAY UN LOCO PEGANDO!', '¡HOLA, 911? ¡VENGAN YA!', '¡ESTÁN ROBANDO, VENGAN!', '¡HAY UNO ARMADO ACÁ!']
+};
+let medicEv = null, medicCd = 12, policeCallCd = 0;
+function startPhone(p, kind, x, z) {
+  cancelScript(p);
+  p.phone = 3.6; p.phoneKind = kind; p.phoneSaid = false; p.callX = x; p.callZ = z; p.post = null; p.scared = 0; p.angry = false;
+  const m = box(0.07, 0.16, 0.03, phoneMat); m.position.set(0, -0.68, -0.1); p.rig.armR.add(m); p.phoneMesh = m;
+}
+function cancelScript(p) {
+  if (p.phoneMesh) { p.rig.armR.remove(p.phoneMesh); p.phoneMesh = null; }
+  p.phone = 0; p.medic = null;
+}
+function phonePed(p, dt) {   // stand still, phone to the ear, then do what the call was for
+  const r = p.rig;
+  walkPose(r, 0, 0); r.body.rotation.x = 0;
+  r.armR.rotation.set(-2.85, 0, 0.5); r.body.rotation.y = Math.sin(p.phone * 3) * 0.12;
+  const ex = p.callX - p.x, ez = p.callZ - p.z, d = Math.hypot(ex, ez); if (d > 0.5) r.g.rotation.y = faceTo(ex / d, ez / d);
+  if (!p.phoneSaid && p.phone < 3.2) { p.phoneSaid = true; pop(pick(CALL_LINES[p.phoneKind]), p.x, 2.7 * r.s, p.z, 'talk'); }
+  p.phone -= dt;
+  if (p.phone <= 0) {
+    const kind = p.phoneKind; cancelScript(p);
+    if (kind === 'pol') { policeCalled(p.callX, p.callZ); p.scared = rand(4, 7); }
+  }
+}
+/* police: the call makes you a suspect and a patrol car drives towards the place a few seconds later */
+function policeCalled(x, z) {
+  if (!settings.police) return;
+  wanted.pending = Math.min(6, wanted.pending + 2.5); drawWanted();
+  setTimeout(() => { if (state === 'play' || state === 'inside') spawnPatrolCarTowards(x, z); }, rand(5000, 9000));
+}
+function laneTowards(x, z, dist) {   // a point on the right lane of the nearest street, `dist` metres away, heading to (x, z)
+  const ox = x - nearest(x), oz = z - nearest(z), alongZ = Math.abs(ox) < Math.abs(oz), side = alongZ ? (Math.sign(ox) || 1) : (Math.sign(oz) || 1);
+  const d = alongZ ? -side : side;   // drive on the lane that is on the same side of the street as the target
+  const dx = alongZ ? 0 : d, dz = alongZ ? d : 0, sx = alongZ ? nearest(x) - dz * LANE : x - dx * dist, sz = alongZ ? z - dz * dist : nearest(z) + dx * LANE;
+  return { sx, sz, dx, dz, alongZ, side };
+}
+function spawnPatrolCarTowards(x, z) {
+  const L = laneTowards(x, z, 45);
+  if (L.sz > COAST + 4 || onHwy(L.sx, L.sz) || solidAt(L.sx, L.sz) || cars.some(o => Math.hypot(o.x - L.sx, o.z - L.sz) < 7)) return;
+  const c = makeCar(L.sx, L.sz, faceTo(L.dx, L.dz), wanted.level > 0 ? 'police' : 'drive', 'policia');
+  c.police = true; c.deployT = 0; c.stuckT = 0; c.speed = 7; c.cruise = 7; seat(c, copRig());
+}
+/* ambulance: two paramedics kneel by the person and try to bring them round */
+function medicRig() {
+  const female = Math.random() < 0.5;
+  const r = makePerson({ shirt: 0xf4f1ea, skin: pick(SKINS), pants: 0x3f8c86, hair: pick(HAIRS), female, hairStyle: female ? pick(['pony', 'bun', 'bob']) : 'short', style: 0, shoe: 0xf4f1ea });
+  r.tough = false; return r;
+}
+function updateMedics(dt) {
+  policeCallCd -= dt;
+  if (!medicEv) {
+    medicCd -= dt; if (medicCd > 0) return;
+    medicCd = 2.5;
+    const vic = peds.find(p => p.state === 'ko' && !p.attended && !p.jobPatient && p.koT > 4 && p.z < COAST && Math.hypot(p.x - player.x, p.z - player.z) < 50 && !onHwy(p.x, p.z));
+    if (!vic) return;
+    vic.attended = true;
+    if (Math.random() < 0.4) return;   // nobody bothered to call this time
+    let caller = null, cd = 26;
+    for (const p of peds) if (p !== vic && p.state === 'walk' && !p.cop && !p.gang && !p.angry && !(p.scared > 0) && !p.phone && !p.medic && !p.tough && !p.chat) { const d = Math.hypot(p.x - vic.x, p.z - vic.z); if (d < cd) { cd = d; caller = p; } }
+    if (!caller) { vic.attended = false; medicCd = 4; return; }
+    startPhone(caller, 'amb', vic.x, vic.z);
+    medicEv = { vic, stage: 'call', t: 3.6 + rand(5, 9), car: null, medics: [] };
+    return;
+  }
+  const E = medicEv, v = E.vic, c = E.car;
+  const gone = peds.indexOf(v) < 0 || (c && (cars.indexOf(c) < 0 || c.wreck || c.state === 'player'));
+  if (gone) { for (const m of E.medics) if (peds.indexOf(m) >= 0) { m.medic = null; m.scared = 3; } medicEv = null; medicCd = rand(15, 25); return; }
+  if (E.stage === 'call') {
+    E.t -= dt; if (E.t > 0) return;
+    if (v.state !== 'ko') { medicEv = null; return; }
+    const L = laneTowards(v.x, v.z, 38);
+    if (L.sz > COAST + 4 || onHwy(L.sx, L.sz) || solidAt(L.sx, L.sz)) { medicEv = null; medicCd = 8; return; }
+    const car = makeCar(L.sx, L.sz, faceTo(L.dx, L.dz), 'medic', 'ambulancia'); seat(car, medicRig()); car.speed = 8;
+    // stop on the lane level with the patient
+    car.stopX = L.alongZ ? L.sx : v.x; car.stopZ = L.alongZ ? v.z : L.sz; car.medT = 0;
+    E.car = car; E.stage = 'drive';
+    if (Math.hypot(L.sx - player.x, L.sz - player.z) < 70) sfx('siren');
+  } else if (E.stage === 'drive') {
+    if (c.speed < 0.2 && Math.hypot(c.x - c.stopX, c.z - c.stopZ) < 3 || c.medT > 14) {
+      c.speed = 0; c.state = 'medicStop';
+      const out = unseat(c), m1 = makePed(out.rig, out.x, out.z, 1, 0), [fx, fz] = carF(c), k = -(c.hw + 0.4);
+      const m2 = makePed(medicRig(), c.x - fz * k - fx * 0.3, c.z + fx * k - fz * 0.3, 1, 0);
+      const side = Math.hypot(v.x - c.x, v.z - c.z) || 1, px = -(v.z - c.z) / side, pz = (v.x - c.x) / side;
+      [m1, m2].forEach((m, i) => { m.tried = true; m.mood = 'calm'; m.medic = { spotX: v.x + px * (i ? 0.75 : -0.75), spotZ: v.z + pz * (i ? 0.75 : -0.75), t: 0 }; });
+      E.medics = [m1, m2]; E.stage = 'walk'; sfx('door');
+      pop(pick(['¡PERMISO, PERMISO!', '¡A UN LADO, DEJEN PASAR!']), m2.x, 2.7, m2.z, 'talk');
+    }
+  } else if (E.stage === 'walk') {
+    if (E.medics.every(m => m.medic && m.medic.at)) { E.stage = 'cpr'; E.t = 4.5; pop(pick(['¡VAMOS, RESPIRÁ!', '¡DALE, VOLVÉ!', 'TRANQUILO, ESTAMOS ACÁ']), E.medics[0].x, 2.4, E.medics[0].z, 'talk'); }
+    if (E.medics.some(m => !m.medic)) { medicEv = null; medicCd = 15; }
+  } else if (E.stage === 'cpr') {
+    E.t -= dt; if (E.t > 0) return;
+    if (Math.random() < 0.6) {   // they bring them round
+      v.state = 'walk'; v.koT = 0; v.kbx = v.kbz = 0; v.hp = 3; v.cash = 0; v.angry = false; v.scared = 0; v.post = null;
+      if (v.stars) { v.rig.g.remove(v.stars); v.stars = null; }
+      const r = v.rig; r.body.rotation.set(0, 0, 0); r.body.position.y = 0; r.armL.rotation.set(0, 0, 0); r.armR.rotation.set(0, 0, 0);
+      pop(pick(['¡ME SALVARON!', '¡GRACIAS, GRACIAS!', '¿QUÉ PASÓ?']), v.x, 2.7, v.z, 'talk');
+      setTimeout(() => { const m = E.medics[1]; if (m && peds.indexOf(m) >= 0) pop(pick(['¡TE SALVAMOS!', '¡ZAFASTE, CAMPEÓN!']), m.x, 2.7, m.z, 'talk'); }, 900);
+      E.saved = true;
+    } else pop(pick(['UY... ESTE ESTÁ MUERTO', 'NO HAY NADA QUE HACER', 'LO PERDIMOS...']), E.medics[0].x, 2.7, E.medics[0].z, 'talk');
+    for (const m of E.medics) if (m.medic) { m.medic.back = true; m.medic.at = false; }
+    E.stage = 'back';
+  } else if (E.stage === 'back') {
+    const done = E.medics.every(m => !m.medic || m.medic.inCar);
+    if (done) {
+      if (!E.saved) { const k = peds.indexOf(v); if (k >= 0) removePed(k); }   // they take the body with them
+      for (const m of E.medics) { const k = peds.indexOf(m); if (k >= 0) removePed(k); }
+      seat(c, medicRig()); c.state = 'drive'; c.cruise = 8; c.speed = 2;
+      medicEv = null; medicCd = rand(20, 35);
+    }
+  }
+}
+function medicPed(p, dt) {
+  const r = p.rig, M = p.medic, c = medicEv && medicEv.car;
+  if (M.back && c) {
+    const [dx0, dz0] = carDoor(c), ex = dx0 - p.x, ez = dz0 - p.z, d = Math.hypot(ex, ez);
+    if (d < 0.6) { M.inCar = true; p.x = dx0; p.z = dz0; r.g.visible = false; return; }
+    const st = Math.min(d, 2.4 * dt); p.x += ex / d * st; p.z += ez / d * st; p.phase += dt * 10; walkPose(r, p.phase, 0.6); r.g.rotation.y = faceTo(ex / d, ez / d); return;
+  }
+  const ex = M.spotX - p.x, ez = M.spotZ - p.z, d = Math.hypot(ex, ez);
+  if (!M.at && d > 0.15) { const st = Math.min(d, 2.4 * dt); p.x += ex / d * st; p.z += ez / d * st; p.phase += dt * 10; walkPose(r, p.phase, 0.6); r.g.rotation.y = faceTo(ex / d, ez / d); return; }
+  M.at = true; M.t += dt;
+  const v = medicEv && medicEv.vic; if (v) { const vx = v.x - p.x, vz = v.z - p.z, vd = Math.hypot(vx, vz) || 1; r.g.rotation.y = faceTo(vx / vd, vz / vd); }
+  walkPose(r, 0, 0);   // kneeling, pumping on the chest
+  r.body.position.y = -0.5 * r.s; r.body.rotation.x = 0.55; r.legL.rotation.x = r.legR.rotation.x = 1.4;
+  const pump = 1.25 + Math.sin(M.t * 9) * 0.25; r.armL.rotation.set(pump, 0, 0.2); r.armR.rotation.set(pump, 0, -0.2);
+}
+function medicDrive(c, dt) {   // drive straight down the lane, braking to stop level with the patient
+  c.medT += dt;
+  const [fx, fz] = carF(c), ahead = (c.stopX - c.x) * fx + (c.stopZ - c.z) * fz;
+  const target = ahead > 0 ? Math.min(9, ahead * 0.9) : 0;
+  c.speed = c.speed < target ? Math.min(target, c.speed + 6 * dt) : Math.max(target, c.speed - 12 * dt);
+  if (c.g.userData.bar) { const on = Math.floor(elapsed * 6) % 2; c.g.userData.bar[0].visible = !!on; c.g.userData.bar[1].visible = !on; }
+}
+
 /* ---------- pause & options ---------- */
 const SETTINGS_UI = [
   ['police', 'Policía', 'Te persiguen si cometés delitos'],
@@ -4745,6 +4893,7 @@ function startGame() {
   player.hp = player.maxHp; player.invuln = 0; player.attack = null; player.down = 0; player.kickBonus = 0;
   player.money = 500; player.earned = 0; addMoney(0);   // you start with $500 in your pocket
   player.rig.body.rotation.set(0, 0, 0); player.rig.body.position.y = 0;
+  medicEv = null; medicCd = 12; policeCallCd = 0;
   equip(null); dropGun(); resetJob(); resetRace(); resetWorldThreats(); drawHearts();
   menuEl.hidden = true; overEl.hidden = true; shopOv.hidden = true; state = 'play';
   player.walking = false; input.back = input.fwd = false; bF.classList.remove('on');
@@ -4939,6 +5088,10 @@ function updatePeds(dt) {
           if (dist < 1.7) hurtPlayer(p.dmg + (p.weapon ? 1 : 0));
         }
         if (p.t >= 0.6) { p.state = 'walk'; p.cd = rand(0.9, 1.5) * (p.tough ? 1.2 : 1); r.body.rotation.y = 0; }
+      } else if (p.phone > 0) {
+        phonePed(p, dt);
+      } else if (p.medic) {
+        medicPed(p, dt);
       } else if ((p.gang || (p.cop && wanted.level > 0)) && shooterLogic(p, dt, dist, tx, tz)) {
         // handled
       } else if (p.post && !p.angry && !(p.scared > 0)) {
@@ -5056,7 +5209,7 @@ function frame(now) {
     updatePlayer(dt); updatePeds(dt); updateCars(dt); updateProps(dt); updateDebris(dt); updateBullets(dt); updateAir(dt);
     if (state === 'play') { updateGangs(dt); updatePolice(dt); updateHeli(dt); }
     maybeChallenge(dt); updateChallenge(dt); updateRace(dt);
-    if (state === 'play') { updateJob(dt); drawJob(); }
+    if (state === 'play') { updateJob(dt); drawJob(); updateMedics(dt); }
   }
   updateWorld(dt);
   drawMap();

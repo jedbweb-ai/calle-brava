@@ -32,7 +32,7 @@ renderer y texturas en canvas → edificios por zona (`buildCentro`, `buildTower
 autos → efectos/sonido (`sfx`) → combate (`startAttack`, `resolveHit`, `poseAttack`) → HUD/minimapa/mapa grande → input →
 armería → armas de fuego → picadas → bandas → policía (`addHeat`, `policeDrive`, `updatePolice`, `dispatches`) → helicóptero →
 aeropuerto/aviones → **negocios y robos** (`BIZ`, `bizOf`, `buildRoom`, `enterBiz`/`leaveBiz`, `startHeist`, `updateRoom*`) →
-**trabajos** (`JOB_INFO`, `jobSpot`, `updateJob`, ambulancia) → pausa/opciones → estado de juego → `frame()`.
+**trabajos** (`JOB_INFO`, `jobSpot`, `updateJob`, ambulancia) → **llamadas** (`startPhone`, `updateMedics`, `policeCalled`) → pausa/opciones → estado de juego → `frame()`.
 
 ## Cómo está hecho hoy (decisiones ya tomadas)
 
@@ -62,7 +62,12 @@ aeropuerto/aviones → **negocios y robos** (`BIZ`, `bizOf`, `buildRoom`, `enter
   choques entre autos (`(fuerza-3)·3`, repartido por peso), paredes (`(fuerza-5)·2`) y postes (6). Bajo 50 % humo gris, bajo 25 % negro; en 0 `explodeCar`:
   radio 6,5 m, desmaya gente, lastima al jugador (2–3 corazones), voltea árboles/faroles, empuja y daña autos cercanos (explosiones en cadena), queda carcasa negra en llamas que no se puede usar.
   Si lo causó el jugador, suma búsqueda. Manejando, el cartel de arriba muestra "DAÑO x %".
+- **Llamadas por celular** (sección "phone calls"): un NPC que llama se queda quieto con la mano en la oreja (`p.phone`, celular en `armR`) y dice la frase en globo.
+  Ambulancia: si hay un desmayado hace más de 4 s cerca del jugador, el 60 % de las veces alguien llama; llega una ambulancia (`state 'medic'`, para en el carril del lado del herido),
+  bajan dos enfermeros (`medicRig`, `p.medic`), se arrodillan y hacen RCP 4,5 s: 60 % se levanta ("¡ME SALVARON!"), 40 % no ("UY... ESTE ESTÁ MUERTO") y se lo llevan. Una a la vez, pausa de 20–35 s entre ambulancias.
+  Policía: en `alarm()`, el 30 % de los testigos que huirían llaman (máx. una llamada cada 12 s); al cortar suman 2,5 de sospecha y a los 5–9 s pasa un patrullero (`spawnPatrolCarTowards`) que te reconoce si te ve.
 - **Policía:** solo persigue si un policía te ve (o sospecha que se borra sola). Patrulleros: 10,5 + 1,2 × nivel, aceleración 8.
+  Presencia reducida: patrullas a pie cada 24–40 s, máximo 2 policías caminando (sin contar guardias de comisaría), 35 % de a dos; en persecución un patrullero nuevo cada 9 s.
   **Helicóptero** (nivel 3) desactivable en Opciones (`settings.heli`).
 - **Difusión:** se hizo una imagen promocional para historia de Instagram con ChatGPT (estilo póster de mundo abierto) a partir de capturas verticales sin HUD; para capturas nuevas, ocultar `#hud,#controls,#hint,#zone,#aim,#raceNav,#heist,#enter,.pop` y usar 540×960 con deviceScaleFactor 2.
 - Opciones guardadas en `localStorage['calle-brava-settings']`; récord en `localStorage['calle-brava-best']`.
