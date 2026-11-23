@@ -280,7 +280,7 @@ body.menu-open #hud,body.menu-open #controls,body.menu-open #hint,body.menu-open
   <div class="card mapcard">
     <h2>La ciudad</h2>
     <canvas id="bigMap" width="800" height="640" aria-label="Mapa completo de la ciudad"></canvas>
-    <span class="sub">Naranja: autopistas · Azul: comisarías · Círculos: territorio de bandas · $ verde: negocios para robar · $ grande: bancos · H hospital · E escuela · S supermercado · N nafta · ✚ iglesia</span>
+    <span class="sub">Naranja: autopistas · Azul: comisarías · Círculos: territorio de bandas · $ verde: negocios para robar · $ grande: bancos · H hospital · E escuela · S supermercado · N nafta · ✚ iglesia · F cancha</span>
     <button id="mapClose" class="big">VOLVER</button>
   </div>
 </div>
@@ -385,6 +385,7 @@ function districtOf(i, j) {
   if (i >= 6 && i <= 9 && j >= 4) return 'puerto';
   if (i >= 8) return 'industrial';
   if (i >= 4) return j >= 2 ? 'paseo' : 'torres';
+  if (i >= -13 && i <= -10 && j >= -6 && j <= 1) return 'obrero';   // Villa Obrera: monoblocks y canchitas
   if (i <= -4) return j >= 2 ? 'casitas' : 'barrio';
   return 'centro';
 }
@@ -395,15 +396,16 @@ const stationAt = (i, j) => STATIONS.find(s => s.i === i && s.j === j);
 function zoneOf(i, j) {
   const d = districtOf(i, j);
   if (d === 'centro' && (i === -1 || i === 0) && (j === 3 || j === 4)) return 'plaza';   // the big central park
-  if (!stationAt(i, j) && d !== 'playa' && d !== 'colina' && d !== 'casitas' && d !== 'aeropuerto' && d !== 'puerto' && d !== 'industrial' && !(i === 0 && j === -1) && hash(i * 7 + 3, j * 13 + 1) % 6 === 0) return 'plaza';
+  if (!stationAt(i, j) && d !== 'playa' && d !== 'colina' && d !== 'casitas' && d !== 'aeropuerto' && d !== 'puerto' && d !== 'industrial' && d !== 'obrero' && !(i === 0 && j === -1) && hash(i * 7 + 3, j * 13 + 1) % 6 === 0) return 'plaza';
   return d;
 }
 const zoneAt = (x, z) => zoneOf(Math.floor(x / P), Math.floor(z / P));
 /* Some blocks hold a single public building instead of the usual four lots. */
-const SPECIALS = { centro: ['iglesia', 'hospital', 'escuela', 'super', 'nafta'], barrio: ['escuela', 'nafta', 'super'], torres: ['hospital', 'nafta'], paseo: ['iglesia'] };
+const SPECIALS = { obrero: ['cancha', 'cancha', 'escuela', 'super'], centro: ['iglesia', 'hospital', 'escuela', 'super', 'nafta'], barrio: ['escuela', 'nafta', 'super'], torres: ['hospital', 'nafta'], paseo: ['iglesia'] };
 function specialOf(i, j) {
   const fixed = BANKS[i + ',' + j] || HOSPITALS[i + ',' + j]; if (fixed) return fixed;
   const list = SPECIALS[zoneOf(i, j)]; if (!list || stationAt(i, j) || (i === 0 && j === -1)) return null;
+  if (zoneOf(i, j) === 'obrero' && hash(i * 3 + 1, j * 5 + 2) % 5 === 0) return 'cancha';   // varias canchitas en Villa Obrera
   const h = hash(i * 11 + 5, j * 17 + 3); return h % 6 === 0 ? list[(h >> 5) % list.length] : null;
 }
 /* Alleys: a 5-wide passage cutting through many city blocks, either north-south ('z') or east-west ('x'). */
@@ -455,6 +457,7 @@ function lotObs(bi, bj) {
   if (!k) { const zn = zoneOf(bi, bj); return zn === 'puerto' || zn === 'industrial' ? yardObs.get(bi + ',' + bj) || null : null; }
   const r = (ax, bx, az, bz) => [x0 + ax, x0 + bx, z0 + az, z0 + bz], post = (x, z, h = 0.35) => r(x - h, x + h, z - h, z + h);
   if (k === 'nafta') return [r(8, 20, 1.5, 7.7), r(6.7, 8.3, 16.2, 20.8), r(19.7, 21.3, 16.2, 20.8)];
+  if (k === 'cancha') return [r(10.6, 17.4, 0.6, 1.8), r(10.6, 17.4, 26.2, 27.4), post(1, 1), post(27, 1), post(1, 27), post(27, 27)];   // arcos y torres de luz
   if (k === 'super') return [r(1, 27, 1, 13.3)];
   if (k === 'iglesia') return [r(8, 20, 2, 21), r(11.5, 16.5, 21, 26), post(4, 22), post(24, 22)];
   if (k === 'hospital') return [r(2, 26, 2, 18), post(10, 21, 0.25), post(18, 21, 0.25), post(3, 23), post(25, 23)];
@@ -1484,6 +1487,39 @@ function buildHouses(g, x0, z0, rng) {
     decoTree(g, cx + (a ? -4.6 : 4.6), 0, cz + (b ? -4.6 : 4.6), 0.8);
   }
 }
+/* Villa Obrera: monoblocks de cuatro o cinco pisos con balcones, ropa tendida y tanques de agua en la terraza */
+const monoMats = {};
+function monoMat(col, pisos) {
+  const key = col + pisos; if (monoMats[key]) return monoMats[key];
+  const [c, g] = cv(512, 320), fh = 320 / pisos; wallBase(g, 512, 320, col, 1);
+  for (let r = 0; r < pisos; r++) for (let k = 0; k < 6; k++) {
+    const x = 18 + k * 84, y = r * fh;
+    drawWindow(g, x + 6, y + fh * 0.18, 34, fh * 0.5, { frame: '#e8e4dc', lit: Math.random() < 0.35, blind: Math.random() < 0.4 ? 0.6 : 0, blindCol: '#c9a27a' });
+    if (r < pisos - 1 && k % 2 === 0) {   // balcón con baranda y, a veces, ropa tendida
+      g.fillStyle = lite(col, -0.3); g.fillRect(x - 4, y + fh * 0.72, 76, 6);
+      g.fillStyle = 'rgba(40,36,48,.55)'; for (let b = 0; b < 9; b++) g.fillRect(x - 2 + b * 8.5, y + fh * 0.56, 2, fh * 0.16);
+      if (Math.random() < 0.5) for (let b = 0; b < 4; b++) { g.fillStyle = pick(['#ef5a3c', '#2bb3a3', '#ffc93c', '#f4f1ea', '#5b6aa8']); g.fillRect(x + 4 + b * 15, y + fh * 0.5, 9, 12); }
+    }
+  }
+  g.fillStyle = '#2a2633'; g.fillRect(232, 320 - fh * 0.8, 48, fh * 0.8);   // la puerta del palier
+  footGrime(g, 512, 320);
+  const f = lam(c); return (monoMats[key] = [f, f, roofMat, roofMat, f, f]);
+}
+const tanqueGeo = new THREE.CylinderGeometry(0.7, 0.7, 1.2, 10), tanqueMat = mat(0x2b2838);
+function buildMonoblocks(g, x0, z0, rng) {
+  const piso = tbox(28, 0.1, 28, lam(concreteCv, 0xc4c0b8, 1), 6); piso.position.set(x0 + 14, 0.05, z0 + 14); g.add(piso);
+  const col = pick(['#d9b48a', '#c98a6a', '#b8c4b0', '#d8cfc0', '#a8b8c8']), pisos = rng() < 0.5 ? 4 : 5, H = pisos * 3;
+  const largoX = rng() < 0.5;   // dos tiras paralelas con un patio en el medio
+  for (const k of [0, 1]) {
+    const m = new THREE.Mesh(boxGeo, monoMat(col, pisos));
+    if (largoX) { m.scale.set(26, H, 8); m.position.set(x0 + 14, H / 2, z0 + 5 + k * 18); }
+    else { m.scale.set(8, H, 26); m.position.set(x0 + 5 + k * 18, H / 2, z0 + 14); }
+    g.add(m);
+    for (let t = 0; t < 3; t++) { const tq = new THREE.Mesh(tanqueGeo, tanqueMat); tq.position.set(largoX ? x0 + 6 + t * 8 : m.position.x, H + 0.6, largoX ? m.position.z : z0 + 6 + t * 8); g.add(tq); }
+  }
+  const pal = tbox(largoX ? 26 : 4, 0.12, largoX ? 4 : 26, stoneMat, 3); pal.position.set(x0 + 14, 0.08, z0 + 14); g.add(pal);   // el patio
+  decoTree(g, x0 + 7, 0, z0 + 14, 0.9); decoTree(g, x0 + 21, 0, z0 + 14, 0.9);
+}
 function buildMansions(g, x0, z0, rng) {
   for (let a = 0; a < 2; a++) for (let b = 0; b < 2; b++) {
     const cx = x0 + 7 + a * 14, cz = z0 + 7 + b * 14, [lo, hi] = footH(cx, cz, 13.6), top = hi + 0.4;
@@ -1669,6 +1705,13 @@ function buildSpecial(g, x0, z0, kind, rng) {   // every one faces south (+z)
     put(box(1.9, 1.2, 0.05, flagMat), 15, 6, 20);
     for (const fx of [6, 22]) put(tbox(11.6, 1.1, 0.12, picketMat, 0.6), fx, 0.55, 27.7);   // fence with a gate in the middle
     for (const tx of [4, 24]) decoTree(g, x0 + tx, 0, z0 + 21, 1);
+  } else if (kind === 'cancha') {   // potrero de fútbol con arcos y torres de luz
+    put(tbox(28, 0.1, 28, lawnMat, 4), 14, 0.05, 14);
+    const linea = (w, d, x, z) => put(box(w, 0.03, d, whiteMat), x, 0.12, z);
+    linea(24, 0.25, 14, 2); linea(24, 0.25, 14, 26); linea(0.25, 24, 2, 14); linea(0.25, 24, 26, 14); linea(24, 0.25, 14, 14);
+    const circ = new THREE.Mesh(new THREE.RingGeometry(3, 3.25, 28), whiteMat); circ.rotation.x = -PI / 2; put(circ, 14, 0.12, 14);
+    for (const z of [1.2, 26.8]) { for (const x of [11, 17]) put(box(0.2, 2.4, 0.2, whiteMat), x, 1.2, z); put(box(6.2, 0.2, 0.2, whiteMat), 14, 2.4, z); }
+    for (const [x, z] of [[1, 1], [27, 1], [1, 27], [27, 27]]) { put(box(0.4, 9, 0.4, mat(0x5a5a66)), x, 4.5, z); put(box(1.6, 0.6, 0.8, lampHeadMat), x, 9, z); }
   } else if (kind === 'super') {
     put(tbox(28, 0.1, 28, parkingMat, 5), 14, 0.05, 14);
     put(tbox(26, 7, 12, lam(panelCv, 0xffffff, 1), 3.5), 14, 3.5, 7);
@@ -1725,6 +1768,7 @@ function makeBlock(i, j) {
   else if (zone === 'industrial') buildIndustrial(g, x0, z0, rng);
   else if (zone === 'torres') buildTowers(g, x0, z0, rng, alley);
   else if (zone === 'barrio') buildHouses(g, x0, z0, rng);
+  else if (zone === 'obrero') buildMonoblocks(g, x0, z0, rng);
   else if (zone === 'colina') buildMansions(g, x0, z0, rng);
   else if (zone === 'plaza') buildPlaza(g, x0, z0, rng, bprops);
   else if (zone === 'paseo') buildPaseo(g, x0, z0, rng, alley);
@@ -2105,7 +2149,7 @@ const LANE = 2.25, CURB = 3.4;
 const carF = c => [-Math.sin(c.th), -Math.cos(c.th)];
 const cardinal = th => ((Math.round(-th / (PI / 2)) % 4) + 4) % 4;
 let carHintT = 0;
-const ZONE_NAMES = { puerto: 'EL PUERTO', industrial: 'ZONA INDUSTRIAL', autopista: 'AUTOPISTA', aeropuerto: 'AEROPUERTO', paseo: 'PASEO TURÍSTICO', casitas: 'BARRIO DE CASITAS', centro: 'EL CENTRO', torres: 'MICROCENTRO', barrio: 'BARRIO RESIDENCIAL', colina: 'LA LOMA', playa: 'LA COSTA', plaza: 'PLAZA' };
+const ZONE_NAMES = { obrero: 'VILLA OBRERA', puerto: 'EL PUERTO', industrial: 'ZONA INDUSTRIAL', autopista: 'AUTOPISTA', aeropuerto: 'AEROPUERTO', paseo: 'PASEO TURÍSTICO', casitas: 'BARRIO DE CASITAS', centro: 'EL CENTRO', torres: 'MICROCENTRO', barrio: 'BARRIO RESIDENCIAL', colina: 'LA LOMA', playa: 'LA COSTA', plaza: 'PLAZA' };
 let curZone = null, curTurf = null;
 function placeName() {
   const i = Math.floor(player.x / P), j = Math.floor(player.z / P);
@@ -2792,8 +2836,8 @@ setTurnMode(false);
 
 /* minimap */
 const mapCv = document.getElementById('map'), mg = mapCv.getContext('2d');
-const ZONE_COLORS = { aeropuerto: '#8f8b96', paseo: '#e89a7a', casitas: '#b8d98a', centro: '#8a6f78', torres: '#6f86a8', barrio: '#9cbf86', colina: '#c9b27a', plaza: '#5fae5a', puerto: '#7d8794', industrial: '#a3968a', playa: '#e9d3a0' };
-const SPECIAL_ICON = { bancoC: ['$', '#2f7a4a'], bancoM: ['$', '#2f7a4a'], bancoG: ['$', '#8a6a2a'], iglesia: ['✚', '#5a4a6a'], hospital: ['H', '#d62828'], escuela: ['E', '#24345c'], super: ['S', '#d62828'], nafta: ['N', '#1f5a8a'] };
+const ZONE_COLORS = { obrero: '#b89a86', aeropuerto: '#8f8b96', paseo: '#e89a7a', casitas: '#b8d98a', centro: '#8a6f78', torres: '#6f86a8', barrio: '#9cbf86', colina: '#c9b27a', plaza: '#5fae5a', puerto: '#7d8794', industrial: '#a3968a', playa: '#e9d3a0' };
+const SPECIAL_ICON = { cancha: ['F', '#2f7a4a'], bancoC: ['$', '#2f7a4a'], bancoM: ['$', '#2f7a4a'], bancoG: ['$', '#8a6a2a'], iglesia: ['✚', '#5a4a6a'], hospital: ['H', '#d62828'], escuela: ['E', '#24345c'], super: ['S', '#d62828'], nafta: ['N', '#1f5a8a'] };
 function drawMap() {
   const S = 224, sc = S / 150, cx = S / 2, cy = S / 2;
   mg.fillStyle = '#4a4752'; mg.fillRect(0, 0, S, S);
@@ -2900,7 +2944,7 @@ function drawBigMap() {
   for (const k in GANGS) { const G = GANGS[k]; g.fillStyle = G.css + '77'; g.beginPath(); g.arc(X(G.x), Y(G.z), 30 / P * c, 0, PI * 2); g.fill(); }
   for (const s of STATIONS) { g.fillStyle = '#3b6aff'; g.strokeStyle = '#fff4e2'; g.lineWidth = 2; g.fillRect(X(s.x) - 7, Y(s.z) - 9, 14, 12); g.strokeRect(X(s.x) - 7, Y(s.z) - 9, 14, 12); }
   g.font = '900 15px "Arial Black", Impact, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.lineJoin = 'round';
-  for (const [t, bi, bj] of [['LA LOMA', 0.5, -9.5], ['EL CENTRO', 0.5, -1.5], ['PARQUE', 0, 4], ['MICROCENTRO', 6, -4.5], ['PASEO', 5, 3], ['EL PUERTO', 8, 6.45], ['ZONA INDUSTRIAL', 11, -1], ['BARRIO RESIDENCIAL', -8.4, -5.5], ['CASITAS', -8, 4], ['AEROPUERTO', -6.5, -3.4], ['LA COSTA', -4, 6.5], ['PLAYA OESTE', -12.3, 0.5], ['RAMBLA', 12.6, 0.5], ['AUTOPISTA NORTE', -7, -7], ['ROJOS', -2, 2], ['AZULES', 2, -3]]) {
+  for (const [t, bi, bj] of [['LA LOMA', 0.5, -9.5], ['EL CENTRO', 0.5, -1.5], ['PARQUE', 0, 4], ['MICROCENTRO', 6, -4.5], ['PASEO', 5, 3], ['EL PUERTO', 8, 6.45], ['ZONA INDUSTRIAL', 11, -1], ['BARRIO RESIDENCIAL', -8.4, -5.5], ['CASITAS', -8, 4], ['AEROPUERTO', -6.5, -3.4], ['LA COSTA', -4, 6.5], ['PLAYA OESTE', -12.3, 0.5], ['VILLA OBRERA', -11.5, -2.6], ['RAMBLA', 12.6, 0.5], ['AUTOPISTA NORTE', -7, -7], ['ROJOS', -2, 2], ['AZULES', 2, -3]]) {
     g.lineWidth = 4; g.strokeStyle = '#1d1b2e'; g.strokeText(t, X(bi * P), Y(bj * P)); g.fillStyle = '#fff4e2'; g.fillText(t, X(bi * P), Y(bj * P));
   }
   g.save(); g.translate(clamp(X(player.x), 8, 792), clamp(Y(player.z), 8, 632)); g.rotate(-player.yaw);
@@ -3856,7 +3900,7 @@ const BIZ = {
 const BANKS = { '-1,-1': 'bancoC', '5,2': 'bancoM', '6,-5': 'bancoG' };
 /* Extra hospitals on the west side, so an ambulance always has one reasonably close. */
 const HOSPITALS = { '-5,-3': 'hospital', '-2,-5': 'hospital' };
-const BIZ_POOL = { centro: ['kiosco', 'almacen', 'farmacia', 'joyeria', 'kiosco', 'farmacia'], torres: ['cambio', 'joyeria', 'farmacia', 'kiosco', 'cambio'], paseo: ['joyeria', 'kiosco', 'farmacia', 'cambio', 'kiosco'], barrio: ['kiosco', 'almacen', 'farmacia', 'almacen'] };
+const BIZ_POOL = { obrero: ['kiosco', 'almacen', 'kiosco', 'farmacia'], centro: ['kiosco', 'almacen', 'farmacia', 'joyeria', 'kiosco', 'farmacia'], torres: ['cambio', 'joyeria', 'farmacia', 'kiosco', 'cambio'], paseo: ['joyeria', 'kiosco', 'farmacia', 'cambio', 'kiosco'], barrio: ['kiosco', 'almacen', 'farmacia', 'almacen'] };
 /* Which shopfront (if any) a block has: same answer every time, so the full map can show them too. */
 function bizOf(i, j) {
   if (i === 0 && j === -2) return { kind: 'kiosco', side: 0, off: 21 };   // one on the first street you walk
@@ -4537,7 +4581,7 @@ const JOB_INFO = {
   taxi: { title: '¡Trabajo de taxista!', text: 'Te llegan llamadas por radio: buscá al pasajero, llevalo a donde te pida y cobrá el viaje. Si llegás rápido y sin chocar, te deja propina.' },
   ambulancia: { title: '¡Turno de ambulancia!', text: 'Hay heridos en la calle. Buscalos y llevalos al hospital más cercano antes de que se acabe el tiempo. Cada traslado se paga bien.' }
 };
-const PLACE_NAMES = { iglesia: 'LA IGLESIA', hospital: 'EL HOSPITAL', escuela: 'LA ESCUELA', super: 'EL SUPERMERCADO', nafta: 'LA ESTACIÓN DE SERVICIO', bancoC: 'EL BANCO DE BARRIO', bancoM: 'EL BANCO DEL SUR', bancoG: 'EL BANCO DEL PLATA' };
+const PLACE_NAMES = { cancha: 'LA CANCHA', iglesia: 'LA IGLESIA', hospital: 'EL HOSPITAL', escuela: 'LA ESCUELA', super: 'EL SUPERMERCADO', nafta: 'LA ESTACIÓN DE SERVICIO', bancoC: 'EL BANCO DE BARRIO', bancoM: 'EL BANCO DEL SUR', bancoG: 'EL BANCO DEL PLATA' };
 const JOB_SIDES = [[-1, 0], [1, 0], [0, -1], [0, 1]];
 let job = null, jobOffer = null;
 const jobDlg = document.getElementById('jobDlg');
