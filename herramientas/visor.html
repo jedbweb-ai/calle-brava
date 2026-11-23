@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Visor del mapa</title>
+<style>
+  body { margin: 0; background: #111; color: #eee; font: 13px system-ui, sans-serif; }
+  #bar { position: fixed; top: 0; left: 0; right: 0; padding: 6px 10px; background: #000c; z-index: 2; }
+  #bar label { margin-right: 10px; }
+  canvas { display: block; }
+</style></head>
+<body>
+<div id="bar">
+  <label><input type="checkbox" id="fondo"> atlas de fondo</label>
+  <label><input type="checkbox" id="manz" checked> manzanas</label>
+  <label><input type="checkbox" id="calles" checked> calles</label>
+  <label><input type="checkbox" id="auto" checked> autopistas</label>
+  <label><input type="checkbox" id="nod" checked> nodos</label>
+  <label><input type="checkbox" id="zon"> zonas</label>
+  <label><input type="checkbox" id="alt"> alturas</label>
+  <label><input type="checkbox" id="det" checked> detalles</label>
+  <span id="info"></span>
+</div>
+<canvas id="c"></canvas>
+<script>
+/* Herramienta de control: dibuja datos.json (en metros del juego) encima del atlas original.
+   Abrir con un servidor local:  python3 -m http.server  y entrar a /herramientas/visor.html
+   Parámetros: ?x=0&z=0&w=2200  (centro y ancho en metros de la vista). */
+const q = new URLSearchParams(location.search);
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+let D, fondo = new Image();
+const ZCOL = { centro: '#e0a050', torres: '#6080e0', paseo: '#c05040', barrio: '#80c070', casitas: '#e0d070', industrial: '#909090', puerto: '#40a0a0', colina: '#c070c0', pueblo: '#a0e0e0' };
+const COL = ['#d8d8d8', '#b8b8c8', '#a0a0b8', '#cfe8a8', '#f6b938', '#f6c75d', '#6b4f3a'];
+async function init() {
+  D = await (await fetch('mapa/datos.json')).json();
+  const svg = await (await fetch('mapa/atlas_sin_textos.svg')).text();
+  fondo.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svg)));
+  await fondo.decode().catch(() => {});
+  draw();
+}
+function draw() {
+  const W = cv.width = innerWidth, Hh = cv.height = innerHeight;
+  const cx = +(q.get('x') || -50), cz = +(q.get('z') || -385), vw = +(q.get('w') || 2300);
+  const s = W / vw;
+  const T = (x, z) => [(x - cx) * s + W / 2, (z - cz) * s + Hh / 2];
+  ctx.fillStyle = '#1b3550'; ctx.fillRect(0, 0, W, Hh);
+  const on = id => document.getElementById(id).checked;
+  const E = D.escala, O = D.origen;
+  if (on('fondo')) {   // el SVG está en unidades: 1 unidad = E metros
+    const [x0, y0] = T(-O[0] * E, -O[1] * E);
+    ctx.globalAlpha = 0.55; ctx.drawImage(fondo, x0, y0, 4000 * E * s, 4000 * E * s); ctx.globalAlpha = 1;
+  }
+  const poly = (pts, flat) => {
+    ctx.beginPath();
+    if (flat) for (let i = 0; i < pts.length; i += 2) { const [a, b] = T(pts[i], pts[i + 1]); i ? ctx.lineTo(a, b) : ctx.moveTo(a, b); }
+    else pts.forEach((p, i) => { const [a, b] = T(p[0], p[1]); i ? ctx.lineTo(a, b) : ctx.moveTo(a, b); });
+  };
+  if (on('alt')) {
+    const n = D.alturas.n, span = 4000 * E, [x0, y0] = T(-O[0] * E, -O[1] * E), cs = span / n * s;
+    for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) { const v = D.alturas.v[j * n + i]; if (v < 4) continue; ctx.fillStyle = `rgba(255,${255 - v},0,${v / 300})`; ctx.fillRect(x0 + i * cs, y0 + j * cs, cs + 1, cs + 1); }
+  }
+  ctx.lineWidth = 2; ctx.strokeStyle = '#00e5ff'; poly(D.costa); ctx.closePath(); ctx.stroke();
+  ctx.strokeStyle = '#00e5ff'; for (const p of D.lagos) { poly(p); ctx.closePath(); ctx.stroke(); }
+  ctx.strokeStyle = '#ffe066'; for (const p of D.playas) { poly(p); ctx.closePath(); ctx.stroke(); }
+  if (on('calles')) for (const e of D.aristas) {
+    poly(e[3], true); ctx.strokeStyle = COL[e[2]]; ctx.lineWidth = q.get('thin') ? 2 : Math.max(1.5, [20, 26, 32, 12][e[2]] * s); if (q.get('thin')) ctx.strokeStyle = ['#000', '#e00', '#a0a', '#080'][e[2]]; ctx.globalAlpha = 1; ctx.stroke(); ctx.globalAlpha = 1;
+  }  if (on('manz')) for (const m of D.plazoletas) { poly(m, true); ctx.closePath(); ctx.fillStyle = '#9c9'; ctx.fill(); }
+  if (on('manz')) D.manzanas.forEach((m, k) => { poly(m, true); ctx.closePath(); ctx.fillStyle = on('zon') ? ZCOL[D.barrios[D.barrio_manzana[k]].tipo] : `hsla(${(k * 47) % 360},60%,60%,0.8)`; ctx.fill(); });
+  if (on('det')) {
+    const dd = D.detalles;
+    ctx.fillStyle = '#3c7'; for (const p of dd.parques) { poly(p); ctx.fill(); }
+    ctx.fillStyle = '#39f'; for (const p of dd.agua) { poly(p); ctx.fill(); }
+    ctx.fillStyle = '#556'; for (const k of ['torres', 'edificios', 'galpones', 'terminal', 'pistas']) for (const p of dd[k]) { poly(p); ctx.fill(); }
+    ctx.fillStyle = '#c63'; for (const k of ['ladrillo', 'casas']) for (const p of dd[k]) { poly(p); ctx.fill(); }
+    ctx.strokeStyle = '#6b4f3a'; ctx.lineWidth = 2; for (const v of D.vias) { poly(v.p); ctx.stroke(); }
+    ctx.fillStyle = '#fff'; ctx.font = '12px system-ui'; ctx.textAlign = 'center';
+    for (const n of D.nombres) { const [a, b] = T(n.x, n.z); ctx.fillText(n.t, a, b); }
+  }
+  if (on('zon')) {
+    ctx.font = 'bold 13px system-ui'; ctx.textAlign = 'center';
+    for (const b of D.barrios) { const [a, c] = T(b.x, b.z); ctx.fillStyle = '#000'; ctx.fillText(b.n + ' · ' + b.tipo, a + 1, c + 1); ctx.fillStyle = '#fff'; ctx.fillText(b.n + ' · ' + b.tipo, a, c); }
+  }
+
+  if (on('auto')) for (const a of D.autopistas) { poly(a.p); ctx.strokeStyle = COL[a.c]; ctx.lineWidth = Math.max(2, (a.c === 4 ? 22 : 9) * s); ctx.stroke(); }
+  if (on('nod')) {
+    const g = new Array(D.nodos.length).fill(0); for (const e of D.aristas) { g[e[0]]++; g[e[1]]++; }
+    D.nodos.forEach((n, i) => { const [a, b] = T(n[0], n[1]); ctx.fillStyle = g[i] === 1 ? '#f22' : g[i] === 2 ? '#fc0' : '#2d2'; ctx.fillRect(a - 2.5, b - 2.5, 5, 5); });
+    document.getElementById('info').textContent = `${D.nodos.length} nodos · ${D.aristas.length} tramos · ${D.manzanas.length} manzanas · rojo = sin salida (${g.filter(v => v === 1).length})`;
+  }
+}
+for (const el of document.querySelectorAll('input')) { if (q.has(el.id)) el.checked = q.get(el.id) === '1'; el.onchange = draw; }
+addEventListener('resize', draw);
+init();
+</script>
+</body></html>
