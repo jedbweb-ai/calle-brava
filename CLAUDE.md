@@ -37,7 +37,8 @@ aeropuerto/aviones → **negocios y robos** (`BIZ`, `bizOf`, `buildRoom`, `enter
 ## Cómo está hecho hoy (decisiones ya tomadas)
 
 - **Controles a pie (estilo GTA):** la cámara manda. Arrastrar gira `player.aim` (continuo); se camina hacia donde mira la cámara.
-  ▲ toggle caminar, ▼ caminar atrás mientras se mantiene (en auto: freno/marcha atrás), ◀ ▶ de costado (6,3 m/s), doble toque gira 90° alineado a la calle.
+  ▲ a pie: mantener = caminar (toque corto = unos pasos, `input.fwd`), dos toques rápidos = caminar solo (`player.walking`), otro toque frena (`fwdPress`); en auto/avión ▲ sigue siendo toggle de acelerador. W igual en teclado.
+  ▼ caminar atrás mientras se mantiene (en auto: freno/marcha atrás), ◀ ▶ de costado (6,3 m/s), doble toque gira 90° alineado a la calle.
   `player.h` es solo la dirección cardinal derivada (la usan spawns y lógica de calles). Mira `#aim` = punto a 14 m al frente; tiros y golpes van ahí.
   En auto/avión arrastrar es mirada libre (`camLook`) que vuelve sola (con arma de fuego tarda 2,5 s en volver).
 - **Disparar desde el auto:** con pistola o metralleta, el botón DISPARAR y la mira siguen en el auto; el tiro sale por la ventana hacia `camYaw + camLook` (`shotDir`), el personaje gira en el asiento y saca el brazo. Los tiros propios no dañan el auto propio.

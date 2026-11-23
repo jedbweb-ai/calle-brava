@@ -240,7 +240,7 @@ body.menu-open #hud,body.menu-open #controls,body.menu-open #hint,body.menu-open
   <div class="card help">
     <h2>Cómo se juega</h2>
     <div class="legend">
-      <span class="chip m">▲</span><span>Caminar o frenar (tocás una vez y sigue solo). Siempre caminás hacia donde mira la cámara</span>
+      <span class="chip m">▲</span><span>Mantenelo apretado para caminar (un toque corto da unos pasos). Dos toques rápidos: caminás solo; otro toque frena. Siempre vas hacia donde mira la cámara. Manejando, un toque acelera o suelta</span>
       <span class="chip m">▼</span><span>Caminar para atrás mientras lo mantenés apretado. Manejando, frena y da marcha atrás</span>
       <span class="chip m">◀ ▶</span><span>Moverte de costado. Dos toques rápidos en ◀ giran a la izquierda; dos en ▶, a la derecha</span>
       <span class="chip m">MIRA</span><span>Arrastrá el dedo o el mouse sobre la pantalla para girar la cámara: el personaje gira con ella y la mira del centro marca adónde van los tiros y los golpes. Manejando, arrastrar solo mira a los costados</span>
@@ -259,7 +259,7 @@ body.menu-open #hud,body.menu-open #controls,body.menu-open #hint,body.menu-open
       <span class="chip c">TRABAJOS</span><span>Subite a un taxi o a una ambulancia (hay una en cada hospital) y te ofrecen un turno. Seguí la flecha y la luz amarilla, frená al lado de la persona para que suba y llevala a destino antes de que se acabe el tiempo. En el taxi, si llegás rápido y sin chocar, hay propina</span>
     </div>
     <p>La ciudad: microcentro al este, paseo turístico y el puerto al sudeste, zona industrial más allá, barrios y aeropuerto al oeste, mansiones en la loma al norte, la playa al sur. Dos autopistas la cruzan. Tocá el minimapa (o la tecla M) para ver el mapa completo.</p>
-    <span class="keys">Teclado: W caminar/acelerar · S atrás/freno · Q cambiar de arma · A D o ← → costado y volante (dos toques: girar) · arrastrar el mouse: mirar y apuntar · J piña (auto: freno, avión: subir) · K patada (avión: bajar) · E entrar o salir · F subir/bajar · L disparar · R recargar · P pausa</span>
+    <span class="keys">Teclado: W caminar (mantener; dos toques: solo) / acelerar · S atrás/freno · Q cambiar de arma · A D o ← → costado y volante (dos toques: girar) · arrastrar el mouse: mirar y apuntar · J piña (auto: freno, avión: subir) · K patada (avión: bajar) · E entrar o salir · F subir/bajar · L disparar · R recargar · P pausa</span>
     <button id="helpBack" class="big">ENTENDIDO</button>
   </div>
 </div>
@@ -2314,7 +2314,7 @@ function setupCars() {
 function enterCar(c) {
   if (state !== 'play' || player.car || player.down || c.wreck || cars.indexOf(c) < 0) return;
   if (c.driver) { driverOut(c, true); addHeat(c.police ? 3 : 1, c.police); } else if (c.police) addHeat(2);
-  player.attack = null; player.walking = false; input.l = input.r = false;
+  player.attack = null; player.walking = false; input.l = input.r = input.fwd = false;
   player.car = c; c.state = 'player'; c.turn = null; c.dodge = 0; c.speed = Math.min(c.speed, 2); seat(c, player.rig);
   player.gas = false; bF.classList.remove('on');
   pLab.textContent = 'FRENO'; bP.classList.remove('armed'); pBar.hidden = true; kLab.textContent = 'BAJAR';
@@ -2871,14 +2871,14 @@ mapCv.addEventListener('click', openMap); document.getElementById('mapClose').ad
 window.addEventListener('keydown', e => { if (e.key.toLowerCase() === 'm') { if (state === 'map') closeMap(); else openMap(); } else if (e.key === 'Escape' && state === 'map') closeMap(); });
 
 /* ---------- input ---------- */
-const input = { l: false, r: false, brake: false, back: false };
+const input = { l: false, r: false, brake: false, back: false, fwd: false };
 const lastSide = { l: 0, r: 0 };
 function sidePress(key) {
   if (!active() || player.down) return;
   if (!player.car && !player.air) {
     const now = performance.now();
     if (now - lastSide[key] < 340) {   // second tap: turn a quarter that way
-      lastSide[key] = 0; input.l = input.r = false;
+      lastSide[key] = 0; input.l = input.r = input.fwd = false;
       player.h = (cardinal(player.aim) + (key === 'l' ? 3 : 1)) % 4; player.aim += angDiff(player.aim, -player.h * PI / 2); if (state === 'play' && inCross(player.x, player.z)) player.pull = 0.6; sfx('turn');
       return;
     }
@@ -2901,11 +2901,23 @@ function setWalking(on) {
   bF.classList.toggle('on', on);
 }
 const forwardToggle = () => setWalking(!((player.car || player.air) ? player.gas : player.walking));
+/* On foot ▲ walks while you hold it (a short tap = a few steps); two quick taps make you walk on your own, any tap stops that.
+   In a car or a plane it still toggles the throttle. */
+let lastFwd = 0;
+function fwdPress() {
+  if (!active() || player.down) return;
+  if (player.car || player.air) { forwardToggle(); return; }
+  const now = performance.now();
+  if (player.walking) { setWalking(false); lastFwd = 0; input.fwd = false; return; }
+  if (now - lastFwd < 330) { setWalking(true); input.fwd = false; lastFwd = 0; return; }
+  lastFwd = now; input.fwd = true;
+}
+const fwdRelease = () => { input.fwd = false; };
 const punchBtn = () => { if (player.air) input.up = true; else if (player.car) input.brake = true; else startAttack('punch'); };
 const backBtn = on => { if (player.air) input.down = on; else if (player.car) input.brake = on; else { input.back = on && active(); if (on && player.walking) setWalking(false); } };
 const kickBtn = () => { if (player.air) input.down = true; else if (player.car) exitCar(); else startAttack('kick'); };
 sideBtn(bL, 'l'); sideBtn(bR, 'r');
-tapBtn(bF, forwardToggle);
+tapBtn(bF, fwdPress, fwdRelease);
 tapBtn(document.getElementById('bB'), () => backBtn(true), () => backBtn(false));
 tapBtn(bP, punchBtn, () => { input.brake = false; input.up = false; });
 tapBtn(document.getElementById('bK'), kickBtn, () => { input.down = false; });
@@ -2924,7 +2936,7 @@ window.addEventListener('keydown', e => {
   if (e.repeat) return;
   if (k === 'arrowleft' || k === 'a') sidePress('l');
   else if (k === 'arrowright' || k === 'd') sidePress('r');
-  else if (k === 'arrowup' || k === 'w') forwardToggle();
+  else if (k === 'arrowup' || k === 'w') fwdPress();
   else if (k === 'arrowdown' || k === 's') backBtn(true);
   else if (k === 'j' || k === 'z') punchBtn();
   else if (k === 'k' || k === 'x') kickBtn();
@@ -2932,6 +2944,7 @@ window.addEventListener('keydown', e => {
 });
 window.addEventListener('keyup', e => {
   const k = e.key.toLowerCase();
+  if (k === 'arrowup' || k === 'w') fwdRelease();
   if (k === 'arrowleft' || k === 'a') input.l = false;
   if (k === 'arrowright' || k === 'd') input.r = false;
   if (k === 'arrowdown' || k === 's') backBtn(false);
@@ -2986,7 +2999,7 @@ function buy(it, price) {
 }
 function openShop() {
   if (state !== 'play' || !nearShop) return;
-  state = 'shop'; input.l = input.r = false; setWalking(false); player.walking = false; bF.classList.remove('on');
+  state = 'shop'; input.l = input.r = input.fwd = false; setWalking(false); player.walking = false; bF.classList.remove('on');
   renderShop(); shopOv.hidden = false; setCtx(null);
 }
 function leaveShop() {
@@ -3706,7 +3719,7 @@ function initAirport() {
 }
 function enterAir(a) {
   if (state !== 'play' || player.car || player.air || player.down) return;
-  player.attack = null; player.walking = false; input.l = input.r = false;
+  player.attack = null; player.walking = false; input.l = input.r = input.fwd = false;
   player.air = a; const S = AIR[a.type], r = player.rig;
   a.g.add(r.g); r.g.position.set(S.seat.x, S.seat.y, S.seat.z); r.g.rotation.set(0, 0, 0); r.g.scale.setScalar(S.seat.s); r.g.visible = true;
   r.body.rotation.set(0, 0, 0); r.body.position.y = 0;
@@ -4131,7 +4144,7 @@ function enterBiz(s) {
   if (t !== undefined && elapsed - t < 150) { pop('¡CERRADO! VOLVÉ MÁS TARDE', s.x, 2.6, s.z, 'item'); sfx('click'); return; }
   const R = buildRoom(s.kind), B = R.B; R.spot = s; room = R;
   scene.remove(player.rig.g); R.scene.add(player.rig.g);
-  player.attack = null; player.walking = false; player.pull = 0; input.l = input.r = false; bF.classList.remove('on');
+  player.attack = null; player.walking = false; player.pull = 0; input.l = input.r = input.fwd = false; bF.classList.remove('on');
   player.h = 0; player.yaw = player.aim = 0; camYaw = 0; camLook = 0; shootHeld = false;
   player.rig.g.position.set(R.px, 0, R.pz); player.rig.g.rotation.y = 0;
   while (bullets.length) scene.remove(bullets.pop().m);
@@ -4325,7 +4338,7 @@ function updateRoomPlayer(dt) {
   if (player.down) return;
   const [fx, fz] = fwd(), rx = -fz, rz = fx, move = input.r - input.l, back = input.back ? 1 : 0, o = { x: R.px, z: R.pz };
   o.x += rx * move * 5 * dt - fx * back * 2.6 * dt; o.z += rz * move * 5 * dt - fz * back * 2.6 * dt;
-  let step = player.walking ? 3.4 * dt : 0;
+  let step = player.walking || input.fwd ? 3.4 * dt : 0;
   for (const a of R.actors) {   // people are in the way
     if (a.st === 'ko') continue;
     const ox = a.x - o.x, oz = a.z - o.z, ah = ox * fx + oz * fz, sd = ox * rx + oz * rz;
@@ -4734,7 +4747,7 @@ function startGame() {
   player.rig.body.rotation.set(0, 0, 0); player.rig.body.position.y = 0;
   equip(null); dropGun(); resetJob(); resetRace(); resetWorldThreats(); drawHearts();
   menuEl.hidden = true; overEl.hidden = true; shopOv.hidden = true; state = 'play';
-  player.walking = false; input.back = false; bF.classList.remove('on');
+  player.walking = false; input.back = input.fwd = false; bF.classList.remove('on');
   const s = streetSpot(5, lateralOf(player.x, player.z, DIRS[player.h][0]) - 1.2); dropPickup('palo', s.x, s.z);
   setupCars(); carT = 2; curZone = null;
 }
@@ -4815,7 +4828,7 @@ function updatePlayer(dt) {
   player.x += rx * move * 6.3 * dt - fx * back * 3.2 * dt; player.z += rz * move * 6.3 * dt - fz * back * 3.2 * dt;
 
   const speed = Math.min(5.2, 3.6 + elapsed * 0.01);
-  let step = playing && player.walking ? speed * dt : 0;
+  let step = playing && (player.walking || input.fwd) ? speed * dt : 0;
   player.blocked = false;
   for (const p of peds) {
     if (p.state === 'ko') continue;
@@ -4887,7 +4900,7 @@ function updatePlayer(dt) {
     if (cross && elapsed < 90) hint = 'ESQUINA: DOS TOQUES EN ◀ O ▶ PARA DOBLAR';
     else if (elapsed > 6 && elapsed < 13) hint = 'DOS TOQUES EN ◀ O ▶: GIRÁS PARA ESE LADO';
     else if (elapsed > 13 && elapsed < 21) hint = 'ARRASTRÁ LA PANTALLA PARA MIRAR Y APUNTAR';
-    else if (!player.walking && elapsed < 6) hint = 'TOCÁ ▲ PARA CAMINAR';
+    else if (!player.walking && !input.fwd && elapsed < 6) hint = 'MANTENÉ ▲ O TOCALO DOS VECES';
     hintEl.hidden = !hint; if (hint) hintEl.textContent = hint;
   } else { setCtx(null); hintEl.hidden = true; }
 }
