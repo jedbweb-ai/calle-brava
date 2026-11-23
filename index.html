@@ -153,7 +153,11 @@ body.menu-open #hud,body.menu-open #controls,body.menu-open #hint,body.menu-open
 .scoreline span{display:block;font-size:10px;letter-spacing:.1em;text-transform:uppercase;font-weight:800;color:var(--plum)}
 .scoreline b{font-family:var(--display);font-weight:400;font-size:24px;font-variant-numeric:tabular-nums}
 .mapcard{transform:none;max-width:600px;gap:10px}
-#bigMap{width:100%;height:auto;border:3px solid var(--ink);border-radius:12px;display:block}
+#bigMap{width:100%;height:auto;border:3px solid var(--ink);border-radius:12px;display:block;touch-action:none;cursor:grab}
+.mapwrap{position:relative}
+.mapzoom{position:absolute;right:10px;top:10px;display:flex;flex-direction:column;gap:6px}
+.mapzoom button{width:38px;height:38px;border:3px solid var(--ink);border-radius:10px;background:var(--paper);color:var(--ink);font-family:var(--display);font-size:22px;line-height:1;cursor:pointer;box-shadow:0 3px 0 var(--ink)}
+.mapzoom button:focus-visible{outline:3px solid var(--tomato);outline-offset:2px}
 /* shop */
 .shop{transform:none;max-width:440px;gap:10px}
 .shophead{display:flex;justify-content:space-between;align-items:flex-end;gap:10px}
@@ -172,7 +176,7 @@ body.menu-open #hud,body.menu-open #controls,body.menu-open #hint,body.menu-open
   -webkit-text-stroke:2px var(--ink);text-shadow:3px 3px 0 var(--ink);transform:translate(-50%,-50%);white-space:nowrap;animation:pop .75s ease-out forwards}
 .pop.ko{font-size:24px;color:var(--paper);animation-duration:1.1s}
 .pop.cash{color:var(--cash);font-size:26px;animation-duration:1.2s}
-.pop.item{color:var(--paper);font-size:20px;animation-duration:1.3s}
+.pop.got{font-size:17px;color:var(--ink);-webkit-text-stroke:0;text-shadow:none;background:var(--paper);border:3px solid var(--ink);border-radius:12px;padding:4px 10px;animation-duration:1.3s}
 .pop.talk{font-family:var(--body);font-weight:800;font-size:15px;color:var(--ink);-webkit-text-stroke:0;text-shadow:none;background:var(--paper);
   border:3px solid var(--ink);border-radius:12px;padding:4px 10px;animation-duration:1.3s}
 .pop.hurt{color:var(--tomato)}
@@ -279,8 +283,9 @@ body.menu-open #hud,body.menu-open #controls,body.menu-open #hint,body.menu-open
 <div id="mapOv" class="overlay" hidden>
   <div class="card mapcard">
     <h2>La ciudad</h2>
-    <canvas id="bigMap" width="800" height="640" aria-label="Mapa completo de la ciudad"></canvas>
-    <span class="sub">Naranja: autopistas · Azul: comisarías · Círculos: territorio de bandas · $ verde: negocios para robar · $ grande: bancos · H hospital · E escuela · S supermercado · N nafta · ✚ iglesia · F cancha</span>
+    <div class="mapwrap"><canvas id="bigMap" width="800" height="640" aria-label="Mapa completo de la ciudad"></canvas>
+      <div class="mapzoom"><button id="mapIn" aria-label="Acercar">+</button><button id="mapOut" aria-label="Alejar">−</button></div></div>
+    <span class="sub">Naranja: autopistas · Azul: comisarías · Círculos: territorio de bandas · $ verde: negocios para robar · $ grande: bancos · H hospital · E escuela · S supermercado · N nafta · ✚ iglesia · F cancha · Rueda, pellizco o + / − para acercar; arrastrá para moverte</span>
     <button id="mapClose" class="big">VOLVER</button>
   </div>
 </div>
@@ -2570,7 +2575,7 @@ function enterCar(c) {
   player.car = c; c.state = 'player'; c.turn = null; c.dodge = 0; c.speed = Math.min(c.speed, 2); seat(c, player.rig);
   player.gas = false; bF.classList.remove('on');
   pLab.textContent = 'FRENO'; bP.classList.remove('armed'); pBar.hidden = true; kLab.textContent = 'BAJAR';
-  carHintT = 4; pop('¡' + c.spec.name.toUpperCase() + '!', c.x, 2.6, c.z, 'item');
+  carHintT = 4; pop('¡' + c.spec.name.toUpperCase() + '!', c.x, 2.6, c.z, 'got');
   if ((c.type === 'taxi' || c.type === 'ambulancia') && !job) setTimeout(() => offerJob(c), 900);
   setCtx(null); updateShootBtn(); sfx('door');
 }
@@ -2945,7 +2950,7 @@ function resolveHit(kind) {
   if (W) {
     player.uses--;
     if (player.uses <= 0) {
-      sfx('break'); pop('¡SE ROMPIÓ ' + (player.weapon === 'sarten' || player.weapon === 'espada' || player.weapon === 'katana' ? 'LA ' : 'EL ') + W.name.toUpperCase() + '!', player.x, 2.6, player.z, 'item');
+      sfx('break'); pop('¡SE ROMPIÓ ' + (player.weapon === 'sarten' || player.weapon === 'espada' || player.weapon === 'katana' ? 'LA ' : 'EL ') + W.name.toUpperCase() + '!', player.x, 2.6, player.z, 'got');
       equip(null);
     }
     updateAttackBtn();
@@ -3122,7 +3127,7 @@ function drawMap() {
 }
 /* full city map: tap the minimap or press M */
 function drawBigMap() {
-  const el = document.getElementById('bigMap'), g = el.getContext('2d'), i0 = -15, j0 = -27, c = Math.min(800 / 30, 640 / 34), ox = (800 - 30 * c) / 2, X = x => ox + (x / P - i0) * c, Y = z => (z / P - j0) * c;
+  const el = document.getElementById('bigMap'), g = el.getContext('2d'), i0 = -15, c = MAP0.c * mapView.k, X = x => 400 + (x - mapView.x) / P * c, Y = z => 320 + (z - mapView.z) / P * c;
   g.fillStyle = '#2f9fb3'; g.fillRect(0, 0, 800, 640);
   g.fillStyle = '#4a4752'; g.fillRect(X(XW - HALF), Y(ZN - HALF), X(XE + HALF) - X(XW - HALF), Y(COAST + HALF) - Y(ZN - HALF));
   g.fillStyle = '#6f9a5a'; g.fillRect(X(XW - HALF), Y(SHORE_N), X(XE + HALF) - X(XW - HALF), Y(ZN - HALF) - Y(SHORE_N));
@@ -3155,8 +3160,47 @@ function drawBigMap() {
   g.save(); g.translate(clamp(X(player.x), 8, 792), clamp(Y(player.z), 8, 632)); g.rotate(-player.yaw);
   g.fillStyle = '#ffc93c'; g.strokeStyle = '#1d1b2e'; g.lineWidth = 3; g.beginPath(); g.moveTo(0, -13); g.lineTo(10, 10); g.lineTo(0, 4); g.lineTo(-10, 10); g.closePath(); g.fill(); g.stroke(); g.restore();
 }
+/* Zoom del mapa grande: rueda del mouse, pellizco con dos dedos, arrastre y botones + / −.
+   mapView.x/z = punto del mundo en el centro del lienzo; k = aumento (1 = ciudad entera). */
+const MAP0 = (() => { const c = Math.min(800 / 30, 640 / 34), ox = (800 - 30 * c) / 2; return { c, x: ((400 - ox) / c - 15) * P, z: (320 / c - 27) * P }; })();
+const mapView = { k: 1, x: MAP0.x, z: MAP0.z };
+function mapClampView() {
+  mapView.k = clamp(mapView.k, 1, 6);
+  const hw = 400 / MAP0.c * P, hh = 320 / MAP0.c * P, k = mapView.k;   // medio ancho/alto del mapa entero, en metros
+  mapView.x = clamp(mapView.x, MAP0.x - hw + hw / k, MAP0.x + hw - hw / k);
+  mapView.z = clamp(mapView.z, MAP0.z - hh + hh / k, MAP0.z + hh - hh / k);
+}
+let mapRaf = 0;
+function mapRedraw() { mapClampView(); if (!mapRaf) mapRaf = requestAnimationFrame(() => { mapRaf = 0; drawBigMap(); }); }
+function mapZoomAt(f, px, py) {   // px, py en pixeles del lienzo (800×640): ese punto queda quieto
+  const c0 = MAP0.c * mapView.k, wx = mapView.x + (px - 400) / c0 * P, wz = mapView.z + (py - 320) / c0 * P;
+  mapView.k = clamp(mapView.k * f, 1, 6);
+  const c1 = MAP0.c * mapView.k; mapView.x = wx - (px - 400) / c1 * P; mapView.z = wz - (py - 320) / c1 * P;
+  mapRedraw();
+}
+(() => {
+  const el = document.getElementById('bigMap'), pts = new Map();
+  const cv = e => { const r = el.getBoundingClientRect(); return [(e.clientX - r.left) * 800 / r.width, (e.clientY - r.top) * 640 / r.height]; };
+  let pinch = 0;
+  el.addEventListener('wheel', e => { e.preventDefault(); const [px, py] = cv(e); mapZoomAt(Math.exp(-clamp(e.deltaY, -120, 120) * 0.0025), px, py); }, { passive: false });
+  el.addEventListener('pointerdown', e => { el.setPointerCapture(e.pointerId); pts.set(e.pointerId, cv(e)); pinch = 0; });
+  el.addEventListener('pointermove', e => {
+    if (!pts.has(e.pointerId)) return;
+    const prev = pts.get(e.pointerId), cur = cv(e); pts.set(e.pointerId, cur);
+    if (pts.size === 1) { const c = MAP0.c * mapView.k; mapView.x -= (cur[0] - prev[0]) / c * P; mapView.z -= (cur[1] - prev[1]) / c * P; mapRedraw(); }
+    else if (pts.size === 2) {
+      const [a, b] = [...pts.values()], d = Math.hypot(a[0] - b[0], a[1] - b[1]);
+      if (pinch) mapZoomAt(d / pinch, (a[0] + b[0]) / 2, (a[1] + b[1]) / 2);
+      pinch = d;
+    }
+  });
+  const up = e => { pts.delete(e.pointerId); pinch = 0; };
+  el.addEventListener('pointerup', up); el.addEventListener('pointercancel', up);
+  document.getElementById('mapIn').addEventListener('click', () => mapZoomAt(1.6, 400, 320));
+  document.getElementById('mapOut').addEventListener('click', () => mapZoomAt(1 / 1.6, 400, 320));
+})();
 const mapOv = document.getElementById('mapOv');
-function openMap() { if (state !== 'play') return; state = 'map'; input.l = input.r = input.brake = input.up = input.down = false; drawBigMap(); mapOv.hidden = false; }
+function openMap() { if (state !== 'play') return; state = 'map'; input.l = input.r = input.brake = input.up = input.down = false; mapView.x = player.x; mapView.z = player.z; mapClampView(); drawBigMap(); mapOv.hidden = false; }
 function closeMap() { mapOv.hidden = true; if (state === 'map') state = 'play'; }
 mapCv.addEventListener('click', openMap); document.getElementById('mapClose').addEventListener('click', closeMap);
 window.addEventListener('keydown', e => { if (e.key.toLowerCase() === 'm') { if (state === 'map') closeMap(); else openMap(); } else if (e.key === 'Escape' && state === 'map') closeMap(); });
@@ -3401,7 +3445,7 @@ const otherGun = () => player.gun && Object.keys(player.guns).find(k => k !== pl
 function swapGun() {
   const k = otherGun(); if (!k || player.down || !active()) return;
   equipGun(k, false); shootCd = Math.max(shootCd, 0.25); sfx('clank');
-  pop(GUNS[k].name.toUpperCase(), room ? room.px : player.x, 2.6, room ? room.pz : player.z, 'item');
+  pop(GUNS[k].name.toUpperCase(), room ? room.px : player.x, 2.6, room ? room.pz : player.z, 'got');
 }
 const shotDir = () => { if (!player.car) return fwd(); const v = camYaw + camLook; return [-Math.sin(v), -Math.cos(v)]; };
 function tryShoot() {
@@ -3411,7 +3455,7 @@ function tryShoot() {
   if (player.gun.ammo <= 0) {
     if (player.gun.reserve > 0) startReload();
     else if (otherGun() && (player.guns[otherGun()].ammo + player.guns[otherGun()].reserve) > 0) swapGun();   // out of bullets: grab the other gun
-    else { sfx('click'); pop('¡SIN BALAS! COMPRÁ EN LA ARMERÍA', player.x, 2.6, player.z, 'item'); shootCd = 0.8; }
+    else { sfx('click'); pop('¡SIN BALAS! COMPRÁ EN LA ARMERÍA', player.x, 2.6, player.z, 'got'); shootCd = 0.8; }
     return;
   }
   player.gun.ammo--; shootCd = G.rate; shootPose = 0.3; addHeat(0.1); alarm(player.x, player.z, 28, true);
@@ -3428,7 +3472,7 @@ function tryShoot() {
 function startReload() {
   const g = player.gun; if (!g || g.reload > 0 || g.reserve <= 0 || g.ammo >= GUNS[g.key].ammo) return;
   g.reload = player.gun.key === 'metralleta' ? 1.6 : 1.1;
-  sfx('click'); pop('RECARGANDO...', room ? room.px : player.x, 2.6, room ? room.pz : player.z, 'item'); updateShootBtn();
+  sfx('click'); pop('RECARGANDO...', room ? room.px : player.x, 2.6, room ? room.pz : player.z, 'got'); updateShootBtn();
 }
 function updateBullets(dt) {
   shootCd -= dt; shootPose -= dt;
@@ -4022,7 +4066,7 @@ function enterAir(a) {
   r.shadow.visible = false;
   player.gas = false; bF.classList.remove('on');
   pLab.textContent = 'SUBIR'; bP.classList.remove('armed'); pBar.hidden = true; kLab.textContent = 'BAJAR';
-  carHintT = 5; pop('¡' + S.name.toUpperCase() + '!', a.x, 3, a.z, 'item'); setCtx(null); updateShootBtn(); sfx('door');
+  carHintT = 5; pop('¡' + S.name.toUpperCase() + '!', a.x, 3, a.z, 'got'); setCtx(null); updateShootBtn(); sfx('door');
 }
 function exitAir() {
   const a = player.air; if (!a) return;
@@ -4067,7 +4111,7 @@ function updateAir(dt) {
   a.x += -Math.sin(a.yaw) * a.speed * dt; a.z += -Math.cos(a.yaw) * a.speed * dt; a.y += a.vy * dt;
   ground = hgt(a.x, a.z);
   if (a.y < ground) {
-    if (a.vy < -9) { pop('¡ATERRIZAJE FORZOSO!', a.x, 3, a.z, 'item'); sfx('crash'); shake = 0.45; burst(a.x, 0.5, a.z, 0x8a7a6a, 10, 4); a.speed *= 0.2; }
+    if (a.vy < -9) { pop('¡ATERRIZAJE FORZOSO!', a.x, 3, a.z, 'got'); sfx('crash'); shake = 0.45; burst(a.x, 0.5, a.z, 0x8a7a6a, 10, 4); a.speed *= 0.2; }
     a.y = ground; a.vy = 0;
   }
   a.y = Math.min(a.y, ground + 90);
@@ -4436,7 +4480,7 @@ const heistEl = document.getElementById('heist'), heistTxt = document.getElement
 function enterBiz(s) {
   if (state !== 'play' || player.car || player.air || player.down || room) return;
   const t = robbedAt.get(s.id);
-  if (t !== undefined && elapsed - t < 150) { pop('¡CERRADO! VOLVÉ MÁS TARDE', s.x, 2.6, s.z, 'item'); sfx('click'); return; }
+  if (t !== undefined && elapsed - t < 150) { pop('¡CERRADO! VOLVÉ MÁS TARDE', s.x, 2.6, s.z, 'got'); sfx('click'); return; }
   const R = buildRoom(s.kind), B = R.B; R.spot = s; room = R;
   scene.remove(player.rig.g); R.scene.add(player.rig.g);
   player.attack = null; player.walking = false; player.pull = 0; input.l = input.r = input.fwd = false; bF.classList.remove('on');
@@ -4547,7 +4591,7 @@ function dropTill(R, a) {   // the cashier is out cold: the till is on the count
   const amt = R.heist.left; R.heist.left = 0; if (amt <= 0) return;
   const x = clamp(a.x, -R.W / 2 + 0.5, R.W / 2 - 1.6), m = box(0.5, 0.36, 0.36, bagMat); m.position.set(x, 1.24, R.cz); R.scene.add(m);
   R.bags.push({ m, x, z: R.cz, amt });
-  pop('¡LA CAJA QUEDÓ LIBRE!', x, 2.2, R.cz, 'item');
+  pop('¡LA CAJA QUEDÓ LIBRE!', x, 2.2, R.cz, 'got');
 }
 function roomKO(R, a, kb, fx, fz) {
   setSt(a, 'ko'); a.koT = 0; a.kbx = fx * kb; a.kbz = fz * kb; a.rig.g.rotation.y = faceTo(-fx, -fz);
@@ -4591,7 +4635,7 @@ function roomHit(kind) {
   R.heist.extra += 0.15;
   if (W) {
     player.uses--;
-    if (player.uses <= 0) { sfx('break'); pop('¡SE ROMPIÓ ' + (player.weapon === 'sarten' || player.weapon === 'espada' || player.weapon === 'katana' ? 'LA ' : 'EL ') + W.name.toUpperCase() + '!', R.px, 2.6, R.pz, 'item'); equip(null); }
+    if (player.uses <= 0) { sfx('break'); pop('¡SE ROMPIÓ ' + (player.weapon === 'sarten' || player.weapon === 'espada' || player.weapon === 'katana' ? 'LA ' : 'EL ') + W.name.toUpperCase() + '!', R.px, 2.6, R.pz, 'got'); equip(null); }
     updateAttackBtn();
   }
 }
@@ -4612,7 +4656,7 @@ function roomShoot() {
   if (!R || !pg || player.down || shootCd > 0 || pg.reload > 0) return;
   if (!R.heist) { startHeist('aim'); shootCd = 0.5; shootHeld = false; sfx('click'); return; }   // first press: you only point it
   const G = GUNS[pg.key];
-  if (pg.ammo <= 0) { if (pg.reserve > 0) startReload(); else { sfx('click'); pop('¡SIN BALAS!', R.px, 2.6, R.pz, 'item'); shootCd = 0.8; } return; }
+  if (pg.ammo <= 0) { if (pg.reserve > 0) startReload(); else { sfx('click'); pop('¡SIN BALAS!', R.px, 2.6, R.pz, 'got'); shootCd = 0.8; } return; }
   pg.ammo--; shootCd = G.rate; shootPose = 0.3; R.heist.extra += 0.2;
   const [fx, fz] = fwd(), rx = -fz, rz = fx, sx = R.px + fx * 0.6 - rx * 0.37, sz = R.pz + fz * 0.6 - rz * 0.37;
   let hit = null, best = 1e9;
@@ -5308,15 +5352,15 @@ function updatePlayer(dt) {
       const k = pickups[i], d = Math.hypot(k.x - player.x, k.z - player.z);
       if (d < 1.2 && GUNS[k.key]) {   // a gun on the floor: take it, or just its bullets if you already carry one
         const pg = player.guns[k.key];
-        if (!pg) { equipGun(k.key); sfx('pick'); pop('¡AGARRASTE UNA ' + GUNS[k.key].name.toUpperCase() + '!', player.x, 2.6, player.z, 'item'); scene.remove(k.g); pickups.splice(i, 1); }
+        if (!pg) { equipGun(k.key); sfx('pick'); pop('¡AGARRASTE UNA ' + GUNS[k.key].name.toUpperCase() + '!', player.x, 2.6, player.z, 'got'); scene.remove(k.g); pickups.splice(i, 1); }
         else if (pg.reserve < GUNS[pg.key].ammo * 5) {
           const add = Math.min(GUNS[pg.key].ammo, GUNS[pg.key].ammo * 5 - pg.reserve); pg.reserve += add; updateShootBtn();
-          sfx('clank'); pop('+' + add + ' BALAS', player.x, 2.6, player.z, 'item'); scene.remove(k.g); pickups.splice(i, 1);
+          sfx('clank'); pop('+' + add + ' BALAS', player.x, 2.6, player.z, 'got'); scene.remove(k.g); pickups.splice(i, 1);
         }
       } else if (d < 1.2) {
         const cur = player.weapon ? WEAPONS[player.weapon] : null, W = WEAPONS[k.key];
         if (!cur || W.dmg > cur.dmg || (W.dmg === cur.dmg && player.uses < W.uses * 0.5)) {
-          equip(k.key); sfx('pick'); pop('¡AGARRASTE ' + (k.key === 'sarten' || k.key === 'espada' || k.key === 'katana' ? 'UNA ' : 'UN ') + W.name.toUpperCase() + '!', player.x, 2.6, player.z, 'item');
+          equip(k.key); sfx('pick'); pop('¡AGARRASTE ' + (k.key === 'sarten' || k.key === 'espada' || k.key === 'katana' ? 'UNA ' : 'UN ') + W.name.toUpperCase() + '!', player.x, 2.6, player.z, 'got');
           scene.remove(k.g); pickups.splice(i, 1);
         }
       } else if (d > 90) { scene.remove(k.g); pickups.splice(i, 1); }
