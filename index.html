@@ -34,6 +34,9 @@ html,body{height:100%;margin:0;overflow:hidden;background:var(--ink);color:var(-
 .col2{display:flex;flex-direction:column;align-items:center;gap:10px}
 .btn.shoot{background:var(--ink);color:var(--sun);border-color:var(--sun);box-shadow:0 6px 0 var(--sun);width:66px;height:66px;font-size:9px}
 .btn.shoot.down{box-shadow:0 1px 0 var(--sun)}
+.btn.swap{width:auto;height:32px;border-radius:999px;padding:0 10px;font-size:10px;background:var(--ink);color:var(--paper);border:3px solid var(--paper);box-shadow:0 3px 0 var(--paper);gap:4px;grid-auto-flow:column;white-space:nowrap}
+.btn.swap.down{box-shadow:0 0 0 var(--paper);transform:translateY(3px)}
+.btn.swap svg{width:14px;height:14px}
 .btn.shoot small{display:block;font-size:12px;color:var(--paper);margin-top:2px;font-variant-numeric:tabular-nums}
 #raceNav{position:fixed;left:50%;top:calc(118px + env(safe-area-inset-top,0px));transform:translateX(-50%);display:flex;align-items:center;gap:10px;
   background:var(--ink);color:var(--paper);border:3px solid var(--sun);border-radius:14px;padding:6px 14px 6px 8px;box-shadow:4px 4px 0 rgba(29,27,46,.45);pointer-events:none;white-space:nowrap}
@@ -212,6 +215,7 @@ body.menu-open #hud,body.menu-open #controls,body.menu-open #hint,body.menu-open
   </div>
   <div class="atk">
     <div class="col2">
+      <button id="bW" class="btn swap" aria-label="Cambiar de arma" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h14l-4-4M20 16H6l4 4"/></svg><span id="wLab">METRALLETA</span></button>
       <button id="bS" class="btn shoot" aria-label="Disparar" hidden><span class="lab"><span id="sLab">DISPARAR</span><small id="ammo">12</small></span></button>
       <button id="bP" class="btn punch" aria-label="Golpe"><span class="lab" id="pLab">PIÑA</span><span class="bar" id="pBar" hidden><i></i></span></button>
     </div>
@@ -241,7 +245,7 @@ body.menu-open #hud,body.menu-open #controls,body.menu-open #hint,body.menu-open
       <span class="chip m">◀ ▶</span><span>Moverte de costado. Dos toques rápidos en ◀ giran a la izquierda; dos en ▶, a la derecha</span>
       <span class="chip m">MIRA</span><span>Arrastrá el dedo o el mouse sobre la pantalla para girar la cámara: el personaje gira con ella y la mira del centro marca adónde van los tiros y los golpes. Manejando, arrastrar solo mira a los costados</span>
       <span class="chip p">PIÑA</span><span>Golpe rápido. Con un arma en la mano, la usás</span>
-      <span class="chip m">DISPARAR</span><span>Con pistola o metralleta. Manejando también: sacás el arma por la ventana y tirás hacia la mira; arrastrá la pantalla para apuntar a los costados o para atrás</span>
+      <span class="chip m">DISPARAR</span><span>Con pistola o metralleta. Manejando también: sacás el arma por la ventana y tirás hacia la mira; arrastrá la pantalla para apuntar a los costados o para atrás. Si tenés pistola y metralleta, el botón chico de arriba (o la Q) cambia de una a otra; cada una guarda sus balas</span>
       <span class="chip k">PATADA</span><span>Más alcance, más daño</span>
       <span class="chip c">$</span><span>Cada desmayado larga plata. Gastala en las armerías (el rombo amarillo): bates, espadas, pistolas, metralletas. En la calle también aparecen pistolas y metralletas tiradas: si ya tenés una, te suman balas</span>
       <span class="chip p">CHOQUES</span><span>Los autos se rompen con choques y tiros. Primero largan humo y después explotan, lastimando a todo lo que está cerca. Fijate el DAÑO arriba mientras manejás</span>
@@ -255,7 +259,7 @@ body.menu-open #hud,body.menu-open #controls,body.menu-open #hint,body.menu-open
       <span class="chip c">TRABAJOS</span><span>Subite a un taxi o a una ambulancia (hay una en cada hospital) y te ofrecen un turno. Seguí la flecha y la luz amarilla, frená al lado de la persona para que suba y llevala a destino antes de que se acabe el tiempo. En el taxi, si llegás rápido y sin chocar, hay propina</span>
     </div>
     <p>La ciudad: microcentro al este, paseo turístico y el puerto al sudeste, zona industrial más allá, barrios y aeropuerto al oeste, mansiones en la loma al norte, la playa al sur. Dos autopistas la cruzan. Tocá el minimapa (o la tecla M) para ver el mapa completo.</p>
-    <span class="keys">Teclado: W caminar/acelerar · S atrás/freno · A D o ← → costado y volante (dos toques: girar) · arrastrar el mouse: mirar y apuntar · J piña (auto: freno, avión: subir) · K patada (avión: bajar) · E entrar o salir · F subir/bajar · L disparar · R recargar · P pausa</span>
+    <span class="keys">Teclado: W caminar/acelerar · S atrás/freno · Q cambiar de arma · A D o ← → costado y volante (dos toques: girar) · arrastrar el mouse: mirar y apuntar · J piña (auto: freno, avión: subir) · K patada (avión: bajar) · E entrar o salir · F subir/bajar · L disparar · R recargar · P pausa</span>
     <button id="helpBack" class="big">ENTENDIDO</button>
   </div>
 </div>
@@ -1948,7 +1952,7 @@ const faceTo = (fx, fz) => Math.atan2(-fx, -fz);
 const player = {
   rig: makePerson({ shirt: 0xe0483a, skin: 0xe8b48e, pants: 0x2f4a7a, hair: 0x1e1a22, shoe: 0xf2efe6, hood: true, style: 4 }),
   x: 7.5, z: -22, h: 0, yaw: 0, aim: 0, hp: 5, maxHp: 5, walking: false, attack: null, side: 1, invuln: 0, phase: 0, flashT: 0, down: 0,
-  blocked: false, pull: 0, car: null, air: null, gas: false, gun: null, weapon: null, uses: 0, kickBonus: 0, money: 0, earned: 0
+  blocked: false, pull: 0, car: null, air: null, gas: false, gun: null, guns: {}, weapon: null, uses: 0, kickBonus: 0, money: 0, earned: 0
 };
 let room = null;   // the shop interior you are standing in, if any
 const active = () => state === 'play' || state === 'inside';
@@ -2952,7 +2956,7 @@ let nearShop = null;
 const shopOv = document.getElementById('shopOv'), itemsEl = document.getElementById('items');
 function renderShop() {
   document.getElementById('shopMoney').textContent = '$' + player.money;
-  document.getElementById('shopHeld').textContent = 'Tenés: ' + (player.weapon ? WEAPONS[player.weapon].name.toLowerCase() + ' (' + player.uses + ' golpes)' : 'las manos') + (player.gun ? ' · ' + GUNS[player.gun.key].name.toLowerCase() + ' (' + player.gun.ammo + ' + ' + player.gun.reserve + ' de reserva)' : '');
+  document.getElementById('shopHeld').textContent = 'Tenés: ' + (player.weapon ? WEAPONS[player.weapon].name.toLowerCase() + ' (' + player.uses + ' golpes)' : 'las manos') + (Object.keys(player.guns).length > 1 ? ' · pistola (' + player.guns.pistola.ammo + ' + ' + player.guns.pistola.reserve + ') y metralleta (' + player.guns.metralleta.ammo + ' + ' + player.guns.metralleta.reserve + '), en la mano: ' + GUNS[player.gun.key].name.toLowerCase() : '') + (Object.keys(player.guns).length === 1 ? ' · ' + GUNS[player.gun.key].name.toLowerCase() + ' (' + player.gun.ammo + ' + ' + player.gun.reserve + ' de reserva)' : '');
   itemsEl.innerHTML = '';
   for (const it of SHOP) {
     const W = it.w && WEAPONS[it.id], G = it.gun && GUNS[it.id];
@@ -3072,19 +3076,29 @@ function makeGun(key) {
   else { const b = box(0.1, 0.7, 0.14, m); b.position.y = -0.3; g.add(b); const mg2 = box(0.07, 0.12, 0.26, mat(0x4a4458)); mg2.position.set(0, -0.28, 0.16); g.add(mg2); const st = box(0.08, 0.25, 0.12, m); st.position.set(0, 0.1, 0); g.add(st); }
   return g;
 }
-const bS = document.getElementById('bS'), ammoEl = document.getElementById('ammo'), sLab = document.getElementById('sLab');
+const bW = document.getElementById('bW'), wLab = document.getElementById('wLab'), bS = document.getElementById('bS'), ammoEl = document.getElementById('ammo'), sLab = document.getElementById('sLab');
 function updateShootBtn() {
   bS.hidden = !player.gun || !!player.air;
+  const ok = otherGun(); bW.hidden = bS.hidden || !ok; if (ok && wLab.textContent !== GUNS[ok].name.toUpperCase()) wLab.textContent = GUNS[ok].name.toUpperCase();
   const sl = room && !room.heist ? 'APUNTAR' : 'DISPARAR'; if (sLab.textContent !== sl) sLab.textContent = sl;
   if (player.gun) ammoEl.textContent = player.gun.reload > 0 ? '···' : player.gun.ammo + '/' + player.gun.reserve;
 }
-function equipGun(key) {
-  player.gun = { key, ammo: GUNS[key].ammo, reserve: GUNS[key].ammo, reload: 0 };
+/* You can carry both a pistol and a machine gun, each with its own bullets; `player.gun` is the one in your hand. */
+function equipGun(key, fresh = true) {
+  if (fresh || !player.guns[key]) player.guns[key] = { key, ammo: GUNS[key].ammo, reserve: GUNS[key].ammo, reload: 0 };
+  if (player.gun && player.gun !== player.guns[key]) player.gun.reload = 0;
+  player.gun = player.guns[key];
   const r = player.rig; if (r.gunMesh) r.armL.remove(r.gunMesh);
   r.gunMesh = makeGun(key); r.gunMesh.position.y = -0.66; r.armL.add(r.gunMesh);
   updateShootBtn();
 }
-function dropGun() { const r = player.rig; if (r.gunMesh) { r.armL.remove(r.gunMesh); r.gunMesh = null; } player.gun = null; updateShootBtn(); }
+function dropGun() { const r = player.rig; if (r.gunMesh) { r.armL.remove(r.gunMesh); r.gunMesh = null; } player.gun = null; player.guns = {}; updateShootBtn(); }
+const otherGun = () => player.gun && Object.keys(player.guns).find(k => k !== player.gun.key);
+function swapGun() {
+  const k = otherGun(); if (!k || player.down || !active()) return;
+  equipGun(k, false); shootCd = Math.max(shootCd, 0.25); sfx('clank');
+  pop(GUNS[k].name.toUpperCase(), room ? room.px : player.x, 2.6, room ? room.pz : player.z, 'item');
+}
 const shotDir = () => { if (!player.car) return fwd(); const v = camYaw + camLook; return [-Math.sin(v), -Math.cos(v)]; };
 function tryShoot() {
   if (state === 'inside') { roomShoot(); return; }
@@ -3092,6 +3106,7 @@ function tryShoot() {
   const G = GUNS[player.gun.key];
   if (player.gun.ammo <= 0) {
     if (player.gun.reserve > 0) startReload();
+    else if (otherGun() && (player.guns[otherGun()].ammo + player.guns[otherGun()].reserve) > 0) swapGun();   // out of bullets: grab the other gun
     else { sfx('click'); pop('¡SIN BALAS! COMPRÁ EN LA ARMERÍA', player.x, 2.6, player.z, 'item'); shootCd = 0.8; }
     return;
   }
@@ -3153,7 +3168,9 @@ function updateBullets(dt) {
 }
 bS.addEventListener('pointerdown', e => { e.preventDefault(); initAudio(); bS.classList.add('down'); shootHeld = true; tryShoot(); });
 ['pointerup', 'pointercancel', 'pointerleave'].forEach(ev => bS.addEventListener(ev, () => { bS.classList.remove('down'); shootHeld = false; }));
-window.addEventListener('keydown', e => { const k = e.key.toLowerCase(); if ((k === 'l' || k === 'c') && !e.repeat) { shootHeld = true; tryShoot(); } if (k === 'r' && active()) startReload(); });
+window.addEventListener('keydown', e => { const k = e.key.toLowerCase(); if ((k === 'l' || k === 'c') && !e.repeat) { shootHeld = true; tryShoot(); } if (k === 'r' && active()) startReload(); if (k === 'q' && !e.repeat) swapGun(); });
+bW.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); initAudio(); bW.classList.add('down'); swapGun(); });
+['pointerup', 'pointercancel', 'pointerleave'].forEach(ev => bW.addEventListener(ev, () => bW.classList.remove('down')));
 window.addEventListener('keyup', e => { const k = e.key.toLowerCase(); if (k === 'l' || k === 'c') shootHeld = false; });
 
 /* ---------- street races ("picadas") ---------- */
@@ -4839,7 +4856,7 @@ function updatePlayer(dt) {
     for (let i = pickups.length - 1; i >= 0; i--) {
       const k = pickups[i], d = Math.hypot(k.x - player.x, k.z - player.z);
       if (d < 1.2 && GUNS[k.key]) {   // a gun on the floor: take it, or just its bullets if you already carry one
-        const pg = player.gun;
+        const pg = player.guns[k.key];
         if (!pg) { equipGun(k.key); sfx('pick'); pop('¡AGARRASTE UNA ' + GUNS[k.key].name.toUpperCase() + '!', player.x, 2.6, player.z, 'item'); scene.remove(k.g); pickups.splice(i, 1); }
         else if (pg.reserve < GUNS[pg.key].ammo * 5) {
           const add = Math.min(GUNS[pg.key].ammo, GUNS[pg.key].ammo * 5 - pg.reserve); pg.reserve += add; updateShootBtn();

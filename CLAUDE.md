@@ -41,6 +41,7 @@ aeropuerto/aviones → **negocios y robos** (`BIZ`, `bizOf`, `buildRoom`, `enter
   `player.h` es solo la dirección cardinal derivada (la usan spawns y lógica de calles). Mira `#aim` = punto a 14 m al frente; tiros y golpes van ahí.
   En auto/avión arrastrar es mirada libre (`camLook`) que vuelve sola (con arma de fuego tarda 2,5 s en volver).
 - **Disparar desde el auto:** con pistola o metralleta, el botón DISPARAR y la mira siguen en el auto; el tiro sale por la ventana hacia `camYaw + camLook` (`shotDir`), el personaje gira en el asiento y saca el brazo. Los tiros propios no dañan el auto propio.
+- **Dos armas de fuego a la vez:** `player.guns` guarda pistola y metralleta, cada una con sus balas; `player.gun` es la que está en la mano. Botón chico `#bW` arriba de DISPARAR (muestra a cuál cambiás) o tecla Q (`swapGun`). Si la de la mano se queda sin balas, cambia sola a la otra. Agarrar del piso un arma que no tenés la suma y la pone en la mano; una que ya tenés solo suma un cargador a esa arma. Las balas de la armería van al arma de la mano.
 - **Plata inicial:** se arranca cada partida con $500 (`startGame`; `player.earned` arranca en 0).
 - **Negocios robables:** kioscos, almacenes, farmacias, joyerías, casas de cambio (fachadas por `bizOf`, deterministas), minimercado de las nafta,
   supermercados y **3 bancos fijos**: chico `(-1,-1)` centro, mediano `(5,2)` paseo, grande `(6,-5)` microcentro.
