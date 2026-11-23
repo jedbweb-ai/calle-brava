@@ -52,6 +52,12 @@ aeropuerto/aviones → **negocios y robos** (`BIZ`, `bizOf`, `buildRoom`, `enter
   Taxi: destino al azar 140–330 m, tarifa 25 + 0,22/m, propina 30 % si llegás rápido y sin chocar (`jobBump`). Ambulancia: herido tirado + alguien pidiendo ayuda, tiempo límite, siempre al hospital más cercano (`nearestHospital`), 70 + 0,35/m.
   Bajarse del vehículo termina el turno. Ambulancia = tipo de auto `ambulancia` (estacionada bajo el techito de cada hospital por `parkAmbulances`, y alguna en el tránsito). Las picadas no aparecen durante un turno.
   Hospitales: 3 por sorteo al este + 2 fijos al oeste (`HOSPITALS`: barrio `(-5,-3)` y centro `(-2,-5)`).
+- **Armas de fuego en el piso:** `spawnPickup` tira 14 % pistolas y 6 % metralletas; policías y bandas desmayados sueltan la pistola el 40 % de las veces.
+  Si no tenés arma de fuego, la agarrás con el cargador lleno; si ya tenés, solo suma un cargador a la reserva (tope 5 cargadores; si está llena, queda en el piso).
+- **Daño de autos** (sección antes de "guns"): `c.hp`/`c.maxHp` (`carMaxHp`: motos 35, común 100, colectivo 151). Daño por tiros (pistola 12, metralleta 7, enemigos 4, helicóptero 6),
+  choques entre autos (`(fuerza-3)·3`, repartido por peso), paredes (`(fuerza-5)·2`) y postes (6). Bajo 50 % humo gris, bajo 25 % negro; en 0 `explodeCar`:
+  radio 6,5 m, desmaya gente, lastima al jugador (2–3 corazones), voltea árboles/faroles, empuja y daña autos cercanos (explosiones en cadena), queda carcasa negra en llamas que no se puede usar.
+  Si lo causó el jugador, suma búsqueda. Manejando, el cartel de arriba muestra "DAÑO x %".
 - **Policía:** solo persigue si un policía te ve (o sospecha que se borra sola). Patrulleros: 10,5 + 1,2 × nivel, aceleración 8.
   **Helicóptero** (nivel 3) desactivable en Opciones (`settings.heli`).
 - **Difusión:** se hizo una imagen promocional para historia de Instagram con ChatGPT (estilo póster de mundo abierto) a partir de capturas verticales sin HUD; para capturas nuevas, ocultar `#hud,#controls,#hint,#zone,#aim,#raceNav,#heist,#enter,.pop` y usar 540×960 con deviceScaleFactor 2.
@@ -63,4 +69,5 @@ aeropuerto/aviones → **negocios y robos** (`BIZ`, `bizOf`, `buildRoom`, `enter
 - [ ] **Dificultad de la policía:** seguir afinando con juego real (ya se bajó la velocidad de patrulleros).
 - [ ] Opcional: abrir los jardines de barrio residencial y casitas (hoy cerrados por ligustrinas/cercas).
 - [ ] Ideas para trabajos: más tipos (policía, bomberos, delivery), racha de viajes con bonus, que los heridos aparezcan después de peleas reales.
+- [ ] Idea: que la estación de servicio repare el auto (hoy el daño solo se "cura" cambiando de vehículo).
 - [ ] No probado aún: arrastre táctil en celular real, metralleta dentro de los locales, rendimiento en celulares de gama baja (súper y banco grande tienen muchos objetos), entrar con auto a los predios abiertos.
